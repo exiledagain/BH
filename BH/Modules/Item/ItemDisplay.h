@@ -798,6 +798,7 @@ struct ActionReplace
 {
 	string key;
 	string value;
+	std::function<string(UnitItemInfo*)> fn;
 };
 
 struct ColorReplace
