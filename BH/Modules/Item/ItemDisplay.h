@@ -794,11 +794,18 @@ private:
 extern TrueCondition* trueCondition;
 extern FalseCondition* falseCondition;
 
+struct SubstitutionContext {
+	UnitItemInfo* info;
+	string name;
+	ItemsTxt* text;
+
+	SubstitutionContext(UnitItemInfo* info, string&& name);
+};
+
 struct ActionReplace
 {
 	string key;
-	string value;
-	std::function<string(UnitItemInfo*)> fn;
+	function<string(SubstitutionContext&)> fn;
 };
 
 struct ColorReplace
@@ -954,21 +961,23 @@ void SubstituteNameVariables(UnitItemInfo* uInfo,
 	const string& action_name,
 	BOOL          bLimit);
 void ReplaceStatSkillVars(UnitItemInfo* uInfo, string& name);
-string NameVarSockets(UnitItemInfo* uInfo);
-string NameVarRuneNum(UnitItemInfo* uInfo);
-string NameVarRuneName(UnitItemInfo* uInfo);
-string NameVarGemLevel(UnitItemInfo* uInfo);
-string NameVarGemType(UnitItemInfo* uInfo);
-string NameVarIlvl(UnitItemInfo* uInfo);
-string NameVarAlvl(UnitItemInfo* uInfo);
-string NameVarCraftAlvl(UnitItemInfo* uInfo);
-string NameVarLevelReq(UnitItemInfo* uInfo);
-string NameVarWeaponSpeed(ItemsTxt* itemTxt);
-string NameVarRangeAdder(ItemsTxt* itemTxt);
-string NameVarSellValue(UnitItemInfo* uInfo, ItemsTxt* itemTxt);
-string NameVarQty(UnitItemInfo* uInfo);
-string NameVarAllRes(UnitItemInfo* uInfo);
-string NameVarEd(UnitItemInfo* uInfo);
+string NameOriginal(SubstitutionContext& context);
+string NameVarSockets(SubstitutionContext& context);
+string NameVarRuneNum(SubstitutionContext& context);
+string NameVarRuneName(SubstitutionContext& context);
+string NameVarGemLevel(SubstitutionContext& context);
+string NameVarGemType(SubstitutionContext& context);
+string NameVarIlvl(SubstitutionContext& context);
+string NameVarAlvl(SubstitutionContext& context);
+string NameVarCraftAlvl(SubstitutionContext& context);
+string NameVarLevelReq(SubstitutionContext& context);
+string NameVarWeaponSpeed(SubstitutionContext& context);
+string NameVarRangeAdder(SubstitutionContext& context);
+string NameItemCode(SubstitutionContext& context);
+string NameVarSellValue(SubstitutionContext& context);
+string NameVarQty(SubstitutionContext& context);
+string NameVarAllRes(SubstitutionContext& context);
+string NameVarEd(SubstitutionContext& context);
 
 BYTE GetAffixLevel(BYTE ilvl,
 	BYTE qlvl,

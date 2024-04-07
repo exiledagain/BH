@@ -26,25 +26,24 @@
 	{"STAT62", STAT_MANALEECH},		\
 	{"REPLIFE", STAT_REPLENISHLIFE},
 
-
 // All colors here must also be defined in MAP_COLOR_REPLACEMENTS
 #define COLOR_REPLACEMENTS	\
-	{"WHITE", "ÿc0"},		\
-	{"RED", "ÿc1"},			\
-	{"GREEN", "ÿc2"},		\
-	{"BLUE", "ÿc3"},		\
-	{"GOLD", "ÿc4"},		\
-	{"GRAY", "ÿc5"},		\
-	{"BLACK", *p_D2GFX_RenderMode != 4 ? "ÿc6" : "\xFF" "c\x02"},		\
-	{"TAN", "ÿc7"},			\
-	{"ORANGE", "ÿc8"},		\
-	{"YELLOW", "ÿc9"},		\
-	{"PURPLE", "ÿc;"},		\
-	{"DARK_GREEN", "ÿc:"},	\
-	{"CORAL", *p_D2GFX_RenderMode != 4 ? "ÿc1" : "\xFF" "c\x06"},		\
-	{"SAGE", *p_D2GFX_RenderMode != 4 ? "ÿc2" : "\xFF" "c\x07"},		\
-	{"TEAL", *p_D2GFX_RenderMode != 4 ? "ÿc3" : "\xFF" "c\x09"},		\
-	{"LIGHT_GRAY", *p_D2GFX_RenderMode != 4 ? "ÿc5" : "\xFF" "c\x0C"}
+	{"WHITE", [&](SubstitutionContext&) -> string { return "ÿc0"; } },		\
+	{"RED", [&](SubstitutionContext&) -> string { return "ÿc1"; } },			\
+	{"GREEN", [&](SubstitutionContext&) -> string { return "ÿc2"; } },		\
+	{"BLUE", [&](SubstitutionContext&) -> string { return "ÿc3"; } },		\
+	{"GOLD", [&](SubstitutionContext&) -> string { return "ÿc4"; } },		\
+	{"GRAY", [&](SubstitutionContext&) -> string { return "ÿc5"; } },		\
+	{"BLACK",[&](SubstitutionContext&) -> string { return *p_D2GFX_RenderMode != 4 ? "ÿc6" : "\xFF" "c\x02"; } },		\
+	{"TAN", [&](SubstitutionContext&) -> string { return "ÿc7"; } },			\
+	{"ORANGE", [&](SubstitutionContext&) -> string { return "ÿc8"; } },		\
+	{"YELLOW", [&](SubstitutionContext&) -> string { return "ÿc9"; } },		\
+	{"PURPLE", [&](SubstitutionContext&) -> string { return "ÿc;"; } },		\
+	{"DARK_GREEN", [&](SubstitutionContext&) -> string { return "ÿc:"; } },	\
+	{"CORAL", [&](SubstitutionContext&) -> string { return *p_D2GFX_RenderMode != 4 ? "ÿc1" : "\xFF" "c\x06"; } },		\
+	{"SAGE", [&](SubstitutionContext&) -> string { return *p_D2GFX_RenderMode != 4 ? "ÿc2" : "\xFF" "c\x07"; } },		\
+	{"TEAL", [&](SubstitutionContext&) -> string { return *p_D2GFX_RenderMode != 4 ? "ÿc3" : "\xFF" "c\x09"; } },		\
+	{"LIGHT_GRAY", [&](SubstitutionContext&) -> string { return *p_D2GFX_RenderMode != 4 ? "ÿc5" : "\xFF" "c\x0C"; } }
 
 #define MAP_COLOR_WHITE     0x20
 
@@ -65,6 +64,29 @@
 	{"SAGE", 0x82}, \
 	{"TEAL", 0xCB}, \
 	{"LIGHT_GRAY", 0xD6}
+
+const ActionReplace replacements[] = {
+	{ "NAME", NameOriginal },
+	{ "SOCKETS", NameVarSockets },
+	{ "RUNENUM", NameVarRuneNum },
+	{ "RUNENAME", NameVarRuneName },
+	{ "GEMLEVEL", NameVarGemLevel },
+	{ "GEMTYPE", NameVarGemType },
+	{ "ILVL", NameVarIlvl },
+	{ "ALVL", NameVarAlvl },
+	{ "CRAFTALVL", NameVarCraftAlvl },
+	{ "LVLREQ", NameVarLevelReq },
+	{ "WPNSPD", NameVarWeaponSpeed },
+	{ "RANGE", NameVarRangeAdder },
+	{ "CODE", NameItemCode },
+	{ "LBRACE", [&](SubstitutionContext&) -> string { return "{"; } },
+	{ "RBRACE", [&](SubstitutionContext&) -> string { return "}"; } },
+	{ "PRICE", NameVarSellValue },
+	{ "QTY", NameVarQty },
+	{ "RES", NameVarAllRes },
+	{ "ED", NameVarEd },
+COLOR_REPLACEMENTS
+};
 
 std::map<std::string, int> code_to_dwtxtfileno = {
 		{"hax", 0},
@@ -843,6 +865,12 @@ bool IsRune(ItemAttributes* attrs)
 
 BYTE RuneNumberFromItemCode(char* code) { return (BYTE)(((code[1] - '0') * 10) + code[2] - '0'); }
 
+SubstitutionContext::SubstitutionContext(UnitItemInfo* info, string&& name) :
+	info(info),
+	name(name) {
+	text = D2COMMON_GetItemText(info->item->dwTxtFileNo);
+}
+
 // Find the item description. This code is called only when there's a cache miss
 string ItemDescLookupCache::make_cached_T(UnitItemInfo* uInfo)
 {
@@ -933,127 +961,136 @@ void GetItemName(UnitItemInfo* uInfo,
 	name.assign(new_name);
 }
 
-string NameVarSockets(UnitItemInfo* uInfo)
+string NameOriginal(SubstitutionContext& context)
+{
+	return context.name;
+}
+
+string NameVarSockets(SubstitutionContext& context)
 {
 	char sockets[4] = "";
-	sprintf_s(sockets, "%d", D2COMMON_GetUnitStat(uInfo->item, STAT_SOCKETS, 0));
+	sprintf_s(sockets, "%d", D2COMMON_GetUnitStat(context.info->item, STAT_SOCKETS, 0));
 	return 	sockets;
 }
 
-string NameVarRuneNum(UnitItemInfo* uInfo)
+string NameVarRuneNum(SubstitutionContext& context)
 {
 	char runenum[4] = "0";
-	if (IsRune(uInfo->attrs))
-		sprintf_s(runenum, "%d", RuneNumberFromItemCode(uInfo->itemCode));
+	if (IsRune(context.info->attrs))
+		sprintf_s(runenum, "%d", RuneNumberFromItemCode(context.info->itemCode));
 	return runenum;
 }
 
-string NameVarRuneName(UnitItemInfo* uInfo)
+string NameVarRuneName(SubstitutionContext& context)
 {
 	// TODO: removes " Rune" from the rune name. Pretty likely to break on non-english strings
 	// Utilize D2LANG_GetLocaleText(20473) area?
 	char runename[16] = "";
-	if (IsRune(uInfo->attrs))
+	if (IsRune(context.info->attrs))
 	{
-		sprintf_s(runename, uInfo->attrs->name.substr(0, uInfo->attrs->name.find(' ')).c_str());
+		sprintf_s(runename, context.info->attrs->name.substr(0, context.info->attrs->name.find(' ')).c_str());
 	}
 	return runename;
 }
 
-string NameVarGemLevel(UnitItemInfo* uInfo)
+string NameVarGemLevel(SubstitutionContext& context)
 {
 	char gemlevel[16] = "";
-	if (IsGem(uInfo->attrs))
-		sprintf_s(gemlevel, "%s", GetGemLevelString(GetGemLevel(uInfo->attrs)));
+	if (IsGem(context.info->attrs))
+		sprintf_s(gemlevel, "%s", GetGemLevelString(GetGemLevel(context.info->attrs)));
 	return gemlevel;
 }
 
-string NameVarGemType(UnitItemInfo* uInfo)
+string NameVarGemType(SubstitutionContext& context)
 {
 	char gemtype[16] = "";
-	if (IsGem(uInfo->attrs))
-		sprintf_s(gemtype, "%s", GetGemTypeString(GetGemType(uInfo->attrs)));
+	if (IsGem(context.info->attrs))
+		sprintf_s(gemtype, "%s", GetGemTypeString(GetGemType(context.info->attrs)));
 	return gemtype;
 }
 
-string NameVarIlvl(UnitItemInfo* uInfo)
+string NameVarIlvl(SubstitutionContext& context)
 {
 	char ilvl[4] = "0";
-	sprintf_s(ilvl, "%d", uInfo->item->pItemData->dwItemLevel);
+	sprintf_s(ilvl, "%d", context.info->item->pItemData->dwItemLevel);
 	return ilvl;
 }
 
-string NameVarAlvl(UnitItemInfo* uInfo)
+string NameVarAlvl(SubstitutionContext& context)
 {
 	char alvl[4] = "0";
 	int alvl_int = GetAffixLevel(
-		uInfo->attrs->qualityLevel,
-		uInfo->item->pItemData->dwItemLevel,
-		uInfo->attrs->magicLevel
+		context.info->attrs->qualityLevel,
+		context.info->item->pItemData->dwItemLevel,
+		context.info->attrs->magicLevel
 	);
 	sprintf_s(alvl, "%d", alvl_int);
 	return alvl;
 }
 
-string NameVarCraftAlvl(UnitItemInfo* uInfo)
+string NameVarCraftAlvl(SubstitutionContext& context)
 {
 	char craftalvl[4] = "0";
 	int clvl = D2COMMON_GetUnitStat(D2CLIENT_GetPlayerUnit(), STAT_LEVEL, 0);
 
 	int craft_alvl = GetAffixLevel(
-		(int)(0.5 * clvl) + (int)(0.5 * uInfo->item->pItemData->dwItemLevel),
-		uInfo->attrs->qualityLevel,
-		uInfo->attrs->magicLevel
+		(int)(0.5 * clvl) + (int)(0.5 * context.info->item->pItemData->dwItemLevel),
+		context.info->attrs->qualityLevel,
+		context.info->attrs->magicLevel
 	);
 	sprintf_s(craftalvl, "%d", craft_alvl);
 	return craftalvl;
 }
 
-string NameVarLevelReq(UnitItemInfo* uInfo)
+string NameVarLevelReq(SubstitutionContext& context)
 {
 	char lvlreq[4] = "0";
-	sprintf_s(lvlreq, "%d", GetRequiredLevel(uInfo->item));
+	sprintf_s(lvlreq, "%d", GetRequiredLevel(context.info->item));
 	return lvlreq;
 }
 
-string NameVarWeaponSpeed(ItemsTxt* itemTxt)
+string NameVarWeaponSpeed(SubstitutionContext& context)
 {
 	char wpnspd[4] = "0";
-	sprintf_s(wpnspd, "%d", itemTxt->dwspeed);
+	sprintf_s(wpnspd, "%d", context.text->dwspeed);
 	return wpnspd;
 }
 
-string NameVarRangeAdder(ItemsTxt* itemTxt)
+string NameVarRangeAdder(SubstitutionContext& context)
 {
 	char rangeadder[4] = "0";
-	sprintf_s(rangeadder, "%d", itemTxt->brangeadder);
+	sprintf_s(rangeadder, "%d", context.text->brangeadder);
 	return rangeadder;
 }
 
-string NameVarSellValue(UnitItemInfo* uInfo,
-	ItemsTxt* itemTxt)
+string NameItemCode(SubstitutionContext& context)
+{
+	return context.info->itemCode;
+}
+
+string NameVarSellValue(SubstitutionContext& context)
 {
 	char sellvalue[16] = "";
 	UnitAny* pUnit = D2CLIENT_GetPlayerUnit();
-	if (pUnit && itemTxt->bquest == 0)
-		sprintf_s(sellvalue, "%d", D2COMMON_GetItemPrice(pUnit, uInfo->item, D2CLIENT_GetDifficulty(), (DWORD)D2CLIENT_GetQuestInfo(), 0x201, 1));
+	if (pUnit && context.text->bquest == 0)
+		sprintf_s(sellvalue, "%d", D2COMMON_GetItemPrice(pUnit, context.info->item, D2CLIENT_GetDifficulty(), (DWORD)D2CLIENT_GetQuestInfo(), 0x201, 1));
 	return sellvalue;
 }
 
-string NameVarQty(UnitItemInfo* uInfo)
+string NameVarQty(SubstitutionContext& context)
 {
 	char qty[4] = "0";
-	sprintf_s(qty, "%d", D2COMMON_GetUnitStat(uInfo->item, STAT_AMMOQUANTITY, 0));
+	sprintf_s(qty, "%d", D2COMMON_GetUnitStat(context.info->item, STAT_AMMOQUANTITY, 0));
 	return qty;
 }
 
-string NameVarAllRes(UnitItemInfo* uInfo)
+string NameVarAllRes(SubstitutionContext& context)
 {
 	char allres[4] = "0";
-	int fRes = D2COMMON_GetUnitStat(uInfo->item, STAT_FIRERESIST, 0);
-	int lRes = D2COMMON_GetUnitStat(uInfo->item, STAT_LIGHTNINGRESIST, 0);
-	int cRes = D2COMMON_GetUnitStat(uInfo->item, STAT_COLDRESIST, 0);
-	int pRes = D2COMMON_GetUnitStat(uInfo->item, STAT_POISONRESIST, 0);
+	int fRes = D2COMMON_GetUnitStat(context.info->item, STAT_FIRERESIST, 0);
+	int lRes = D2COMMON_GetUnitStat(context.info->item, STAT_LIGHTNINGRESIST, 0);
+	int cRes = D2COMMON_GetUnitStat(context.info->item, STAT_COLDRESIST, 0);
+	int pRes = D2COMMON_GetUnitStat(context.info->item, STAT_POISONRESIST, 0);
 	int minres = 0;
 	if (fRes && lRes && cRes && pRes)
 	{
@@ -1063,20 +1100,20 @@ string NameVarAllRes(UnitItemInfo* uInfo)
 	return allres;
 }
 
-string NameVarEd(UnitItemInfo* uInfo)
+string NameVarEd(SubstitutionContext& context)
 {
 	char ed[4] = "0";
 
 	// Either enhanced defense or enhanced damage depending on item type
 	WORD stat;
-	if (uInfo->attrs->armorFlags & ITEM_GROUP_ALLARMOR) { stat = STAT_ENHANCEDDEFENSE; }
+	if (context.info->attrs->armorFlags & ITEM_GROUP_ALLARMOR) { stat = STAT_ENHANCEDDEFENSE; }
 	else
 	{
 		// Normal %ED will have the same value for STAT_ENHANCEDMAXIMUMDAMAGE and STAT_ENHANCEDMINIMUMDAMAGE
 		stat = STAT_ENHANCEDMAXIMUMDAMAGE;
 	}
 	DWORD     value = 0;
-	StatList* pStatList = D2COMMON_GetStatList(uInfo->item, NULL, 0x40);
+	StatList* pStatList = D2COMMON_GetStatList(context.info->item, NULL, 0x40);
 	if (pStatList)
 	{
 		value += D2COMMON_GetStatValueFromStatList(pStatList, stat, 0);
@@ -1274,29 +1311,6 @@ void SubstituteNameVariables(UnitItemInfo* uInfo,
 
 	ItemsTxt* itemTxt = D2COMMON_GetItemText(uInfo->item->dwTxtFileNo);
 
-	ActionReplace replacements[] = {
-		{ "NAME", origName},
-		{ "SOCKETS", NameVarSockets(uInfo).c_str()},
-		{ "RUNENUM", NameVarRuneNum(uInfo).c_str() },
-		{ "RUNENAME", NameVarRuneName(uInfo).c_str() },
-		{ "GEMLEVEL", NameVarGemLevel(uInfo).c_str() },
-		{ "GEMTYPE", NameVarGemType(uInfo).c_str() },
-		{ "ILVL", NameVarIlvl(uInfo).c_str() },
-		{ "ALVL", NameVarAlvl(uInfo).c_str() },
-		{ "CRAFTALVL", NameVarCraftAlvl(uInfo).c_str() },
-		{ "LVLREQ", NameVarLevelReq(uInfo).c_str() },
-		{ "WPNSPD", NameVarWeaponSpeed(itemTxt).c_str() },
-		{ "RANGE", NameVarRangeAdder(itemTxt).c_str() },
-		{ "CODE", uInfo->itemCode },
-		{ "LBRACE", "{" },
-		{ "RBRACE", "}" },
-		{ "PRICE", NameVarSellValue(uInfo, itemTxt).c_str() },
-		{ "QTY", NameVarQty(uInfo).c_str() },
-		{ "RES", NameVarAllRes(uInfo).c_str() },
-		{ "ED", NameVarEd(uInfo).c_str() },
-	COLOR_REPLACEMENTS
-	};
-
 	int nColorCodesSize = 0;
 	name.assign(action_name);
 
@@ -1324,7 +1338,7 @@ void SubstituteNameVariables(UnitItemInfo* uInfo,
 		{
 			while (varString.find(replacements[n].key) != string::npos)
 			{
-				varString.replace(varString.find(replacements[n].key), replacements[n].key.length(), replacements[n].value);
+				// varString.replace(varString.find(replacements[n].key), replacements[n].key.length(), replacements[n].value);
 			}
 		}
 		name.replace(name.find(var_match[0]), var_match[0].length(), varString);
