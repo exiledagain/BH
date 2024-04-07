@@ -5,6 +5,87 @@
 #include <vector>
 #include <string>
 
+struct Context {
+  std::string name;
+};
+
+std::regex substitution_regex("%([A-Z_]+)(?:(\\d{1,9})(?:,(\\d{1,9}))?)?%", std::regex::ECMAScript);
+std::unordered_map<std::string, std::function<std::function<std::string(const Context&)>(const std::smatch&)>> substitution_map = {
+	{ 
+    "ORANGE",
+    [](const std::smatch&) -> std::function<std::string(const Context&)> {
+      return [](const Context& ctx) -> std::string { return "orange"; }; 
+    }
+  },
+  {
+    "MULTI", 
+    [](const std::smatch& match) -> std::function<std::string(const Context&)> {
+      int a = std::stoi(match[2], 0, 10);
+      int b = std::stoi(match[3], 0, 10);
+      return [a, b](const Context& ctx) -> std::string {
+        std::stringstream stream;
+        stream << "multi " << a << " " << b;
+        return stream.str();
+      };
+    }
+  },
+  {
+    "RUNENAME",
+    [](const std::smatch&) -> std::function<std::string(const Context&)> {
+      return [](const Context& ctx) -> std::string {
+        return ctx.name + "RUNENAME";
+      };
+    }
+  },
+  {
+    "RED",
+    [](const std::smatch&) -> std::function<std::string(const Context&)> {
+      return [](const Context& ctx) -> std::string {
+        return ctx.name + "RED";
+      };
+    }
+  }
+};
+
+std::vector<std::function<std::string(const Context&)>> BuildSubstitutionActions(const std::string& action)
+{
+  auto first = std::sregex_iterator(action.begin(), action.end(), substitution_regex);
+  auto end = std::sregex_iterator();
+
+  std::vector<std::function<std::string(const Context&)>> res;
+
+  size_t lastIndex = 0;
+  for (auto i = first; i != end; ++i) {
+    auto& match = *i;
+    if (lastIndex != match.position()) {
+      const auto string = action.substr(lastIndex, match.position() - lastIndex);
+      res.push_back([string](const Context& ctx) -> std::string {
+        return string;
+      });
+    }
+    lastIndex = match.position() + match.length();
+    const auto& ret = substitution_map.find(match[1]);
+    if (ret == substitution_map.end()) {
+      const auto string = match.str();
+      res.push_back([string](const Context& ctx) -> std::string {
+        return string;
+      });
+      continue;
+    }
+    const auto& fn = ret->second;
+    res.push_back(fn(match));
+  }
+
+  if (lastIndex != action.length()) {
+    const auto string = action.substr(lastIndex);
+    res.push_back([string](const Context& ctx) -> std::string {
+      return string;
+    });
+  }
+
+  return res;
+}
+
 // All the types able to be combined with the + operator
 #define COMBO_STATS					\
 	{"LIFE", STAT_MAXHP},			\
