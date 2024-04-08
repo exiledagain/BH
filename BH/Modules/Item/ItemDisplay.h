@@ -853,12 +853,16 @@ struct ConditionEvalNode {
 	}
 };
 
+struct SubContext;
+
 struct Rule
 {
 	vector<Condition*> conditions;
 	Action             action;
 	size_t root;
 	vector<ConditionEvalNode> nodes;
+	vector<function<string(SubContext&)>> name;
+	vector<function<string(SubContext&)>> description;
 
 	Rule(vector<Condition*>& inputConditions,
 		string* str);
@@ -874,6 +878,8 @@ struct Rule
 		return EvaluateTree(uInfo);
 	}
 
+	string ApplyName(SubContext& ctx);
+	string ApplyDescription(SubContext& ctx);
 	bool EvaluateTree(UnitItemInfo* uInfo);
 private:
 	bool Convert();

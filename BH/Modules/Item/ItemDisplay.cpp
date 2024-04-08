@@ -806,6 +806,585 @@ char* GemTypes[] = {
 	"Skull"
 };
 
+struct SubContext {
+	UnitItemInfo* info;
+	string name;
+	ItemsTxt* text;
+	// no newlines allowed
+	bool limit;
+	bool inShop;
+	bool nlAllowed;
+	bool nmagStaffmod;
+	bool blockedNL;
+
+	SubContext(UnitItemInfo* info, string name, bool limit) :
+		info(info),
+		name(name),
+		limit(limit),
+		blockedNL(false) {
+		text = D2COMMON_GetItemText(info->item->dwTxtFileNo);
+		inShop = (info->item->pItemData->pOwnerInventory != 0 && // Skip on ground items
+			find(begin(ShopNPCs), end(ShopNPCs), info->item->pItemData->pOwnerInventory->pOwner->dwTxtFileNo) != end(ShopNPCs));
+		nlAllowed = ((info->item->pItemData->dwFlags & ITEM_IDENTIFIED) > 0 &&
+			(info->item->pItemData->dwQuality >= ITEM_QUALITY_MAGIC || (info->item->pItemData->dwFlags & ITEM_RUNEWORD) > 0)) ||
+			inShop;
+		nmagStaffmod = ((info->item->pItemData->dwQuality == ITEM_QUALITY_INFERIOR ||
+			info->item->pItemData->dwQuality == ITEM_QUALITY_NORMAL ||
+			info->item->pItemData->dwQuality == ITEM_QUALITY_SUPERIOR) &&
+			info->attrs->staffmodClass < CLASS_NA);
+	}
+
+	void Reset() {
+	}
+};
+
+function<string(SubContext&)> ReplacementAsBoundString(const string&& str) {
+	return [str](SubContext&) -> string {
+		return str;
+	};
+}
+
+function<string(SubContext&)> ReplacementAsStat(int stat) {
+	return [stat](SubContext& ctx) -> string {
+		char buffer[16] = { 0 };
+		auto value = D2COMMON_GetUnitStat(ctx.info->item, stat, 0);
+		// Hp and mana need adjusting
+		if (stat == STAT_MAXHP || stat == STAT_MAXMANA)
+		{
+			value /= 256;
+		}
+		// These stat values need to be grabbed differently otherwise they just:
+		else if (
+			stat == STAT_ENHANCEDDEFENSE ||				// return 0
+			stat == STAT_ENHANCEDMAXIMUMDAMAGE ||		// return 0
+			stat == STAT_ENHANCEDMINIMUMDAMAGE ||		// return 0
+			stat == STAT_MINIMUMDAMAGE ||				// return base min 1h weapon damage
+			stat == STAT_MAXIMUMDAMAGE ||				// return base max 1h weapon damage
+			stat == STAT_SECONDARYMINIMUMDAMAGE ||		// return base min 2h weapon damage
+			stat == STAT_SECONDARYMAXIMUMDAMAGE			// return base max 2h weapon damage
+			)
+		{
+			value = GetStatFromList(ctx.info, stat);
+		}
+		sprintf_s(buffer, "%d", value);
+		return buffer;
+	};
+}
+
+#define REPLACEMENT_BIND_STRING_NO_ARGS(KEY, VALUE) \
+		KEY, \
+		[](const smatch& match) -> function<string(SubContext&)> { \
+			if (match[2].length() || match[3].length()) { \
+				return ReplacementAsBoundString(match.str()); \
+			} \
+			return ReplacementAsBoundString(VALUE); \
+		} \
+
+// all keywords are uppercase by the time this is used
+regex substitutionRegex("%([A-Z_]+)(?:(\\d{1,9})(?:,(\\d{1,9}))?)?%", regex::ECMAScript);
+static unordered_map<string, function<function<string(SubContext&)>(const smatch&)>> substitutionMap = {
+	{
+		"NAME",
+		[](const smatch& match) -> function<string(SubContext&)> {
+			if (match[2].length() || match[3].length()) {
+				return ReplacementAsBoundString(match.str());
+			}
+			return [](SubContext& ctx) -> string {
+				if (ctx.name.length() > 1023) {
+					ctx.name.resize(1023);
+				}
+				return ctx.name;
+			};
+		}
+	},
+	{
+		"SOCKETS",
+		[](const smatch& match) -> function<string(SubContext&)> {
+			if (match[2].length() || match[3].length()) {
+				return ReplacementAsBoundString(match.str());
+			}
+			return [](SubContext& ctx) -> string {
+				return NameVarSockets(ctx.info);
+			};
+		}
+	},
+	{
+		"RUNENUM",
+		[](const smatch& match) -> function<string(SubContext&)> {
+			if (match[2].length() || match[3].length()) {
+				return ReplacementAsBoundString(match.str());
+			}
+			return [](SubContext& ctx) -> string {
+				return NameVarRuneNum(ctx.info);
+			};
+		}
+	},
+	{
+		"RUNENAME",
+		[](const smatch& match) -> function<string(SubContext&)> {
+			if (match[2].length() || match[3].length()) {
+				return ReplacementAsBoundString(match.str());
+			}
+			return [](SubContext& ctx) -> string {
+				return NameVarRuneName(ctx.info);
+			};
+		}
+	},
+	{
+		"GEMLEVEL",
+		[](const smatch& match) -> function<string(SubContext&)> {
+			if (match[2].length() || match[3].length()) {
+				return ReplacementAsBoundString(match.str());
+			}
+			return [](SubContext& ctx) -> string {
+				return NameVarGemLevel(ctx.info);
+			};
+		}
+	},
+	{
+		"GEMTYPE",
+		[](const smatch& match) -> function<string(SubContext&)> {
+			if (match[2].length() || match[3].length()) {
+				return ReplacementAsBoundString(match.str());
+			}
+			return [](SubContext& ctx) -> string {
+				return NameVarGemType(ctx.info);
+			};
+		}
+	},
+	{
+		"ILVL",
+		[](const smatch& match) -> function<string(SubContext&)> {
+			if (match[2].length() || match[3].length()) {
+				return ReplacementAsBoundString(match.str());
+			}
+			return [](SubContext& ctx) -> string {
+				return NameVarIlvl(ctx.info);
+			};
+		}
+	},
+	{
+		"ALVL",
+		[](const smatch& match) -> function<string(SubContext&)> {
+			if (match[2].length() || match[3].length()) {
+				return ReplacementAsBoundString(match.str());
+			}
+			return [](SubContext& ctx) -> string {
+				return NameVarAlvl(ctx.info);
+			};
+		}
+	},
+	{
+		"CRAFTALVL",
+		[](const smatch& match) -> function<string(SubContext&)> {
+			if (match[2].length() || match[3].length()) {
+				return ReplacementAsBoundString(match.str());
+			}
+			return [](SubContext& ctx) -> string {
+				return NameVarCraftAlvl(ctx.info);
+			};
+		}
+	},
+	{
+		"LVLREQ",
+		[](const smatch& match) -> function<string(SubContext&)> {
+			if (match[2].length() || match[3].length()) {
+				return ReplacementAsBoundString(match.str());
+			}
+			return [](SubContext& ctx) -> string {
+				return NameVarLevelReq(ctx.info);
+			};
+		}
+	},
+	{
+		"WPNSPD",
+		[](const smatch& match) -> function<string(SubContext&)> {
+			if (match[2].length() || match[3].length()) {
+				return ReplacementAsBoundString(match.str());
+			}
+			return [](SubContext& ctx) -> string {
+				return NameVarWeaponSpeed(ctx.text);
+			};
+		}
+	},
+	{
+		"RANGE",
+		[](const smatch& match) -> function<string(SubContext&)> {
+			if (match[2].length() || match[3].length()) {
+				return ReplacementAsBoundString(match.str());
+			}
+			return [](SubContext& ctx) -> string {
+				return NameVarRangeAdder(ctx.text);
+			};
+		}
+	},
+	{
+		"CODE",
+		[](const smatch& match) -> function<string(SubContext&)> {
+			if (match[2].length() || match[3].length()) {
+				return ReplacementAsBoundString(match.str());
+			}
+			return [](SubContext& ctx) -> string {
+				return ctx.info->itemCode;
+			};
+		}
+	},
+	{
+		REPLACEMENT_BIND_STRING_NO_ARGS("LBRACE", "{")
+	},
+	{
+		REPLACEMENT_BIND_STRING_NO_ARGS("RBRACE", "}")
+	},
+	{
+		"PRICE",
+		[](const smatch& match) -> function<string(SubContext&)> {
+			if (match[2].length() || match[3].length()) {
+				return ReplacementAsBoundString(match.str());
+			}
+			return [](SubContext& ctx) -> string {
+				return NameVarSellValue(ctx.info, ctx.text);
+			};
+		}
+	},
+	{
+		"QTY",
+		[](const smatch& match) -> function<string(SubContext&)> {
+			if (match[2].length() || match[3].length()) {
+				return ReplacementAsBoundString(match.str());
+			}
+			return [](SubContext& ctx) -> string {
+				return NameVarQty(ctx.info);
+			};
+		}
+	},
+	{
+		"RES",
+		[](const smatch& match) -> function<string(SubContext&)> {
+			if (match[2].length() || match[3].length()) {
+				return ReplacementAsBoundString(match.str());
+			}
+			return [](SubContext& ctx) -> string {
+				return NameVarAllRes(ctx.info);
+			};
+		}
+	},
+	{
+		"ED",
+		[](const smatch& match) -> function<string(SubContext&)> {
+			if (match[2].length() || match[3].length()) {
+				return ReplacementAsBoundString(match.str());
+			}
+			return [](SubContext& ctx) -> string {
+				return NameVarEd(ctx.info);
+			};
+		}
+	},
+	{
+		"BLACK",
+		[](const smatch& match) -> function<string(SubContext&)> {
+			if (match[2].length() || match[3].length()) {
+				return ReplacementAsBoundString(match.str());
+			}
+			return [](SubContext& ctx) -> string {
+				return *p_D2GFX_RenderMode != 4 ? "ÿc6" : "\xFF" "c\x02";
+			};
+		}
+	},
+	{
+		"CORAL",
+		[](const smatch& match) -> function<string(SubContext&)> {
+			if (match[2].length() || match[3].length()) {
+				return ReplacementAsBoundString(match.str());
+			}
+			return [](SubContext& ctx) -> string {
+				return *p_D2GFX_RenderMode != 4 ? "ÿc1" : "\xFF" "c\x06";
+			};
+		}
+	},
+	{
+		"SAGE",
+		[](const smatch& match) -> function<string(SubContext&)> {
+			if (match[2].length() || match[3].length()) {
+				return ReplacementAsBoundString(match.str());
+			}
+			return [](SubContext& ctx) -> string {
+				return *p_D2GFX_RenderMode != 4 ? "ÿc2" : "\xFF" "c\x07";
+			};
+		}
+	},
+	{
+		"TEAL",
+		[](const smatch& match) -> function<string(SubContext&)> {
+			if (match[2].length() || match[3].length()) {
+				return ReplacementAsBoundString(match.str());
+			}
+			return [](SubContext& ctx) -> string {
+				return *p_D2GFX_RenderMode != 4 ? "ÿc3" : "\xFF" "c\x09";
+			};
+		}
+	},
+	{
+		"LIGHT_GRAY",
+		[](const smatch& match) -> function<string(SubContext&)> {
+			if (match[2].length() || match[3].length()) {
+				return ReplacementAsBoundString(match.str());
+			}
+			return [](SubContext& ctx) -> string {
+				return *p_D2GFX_RenderMode != 4 ? "ÿc5" : "\xFF" "c\x0C";
+			};
+		}
+	},
+	{
+		REPLACEMENT_BIND_STRING_NO_ARGS("WHITE", "ÿc0")
+	},
+	{
+		REPLACEMENT_BIND_STRING_NO_ARGS("RED", "ÿc1")
+	},
+	{
+		REPLACEMENT_BIND_STRING_NO_ARGS("GREEN", "ÿc2")
+	},
+	{
+		REPLACEMENT_BIND_STRING_NO_ARGS("BLUE", "ÿc3")
+	},
+	{
+		REPLACEMENT_BIND_STRING_NO_ARGS("GOLD", "ÿc4")
+	},
+	{
+		REPLACEMENT_BIND_STRING_NO_ARGS("GRAY", "ÿc5")
+	},
+	{
+		REPLACEMENT_BIND_STRING_NO_ARGS("TAN", "ÿc7")
+	},
+	{
+		REPLACEMENT_BIND_STRING_NO_ARGS("ORANGE", "ÿc8")
+	},
+	{
+		REPLACEMENT_BIND_STRING_NO_ARGS("YELLOW", "ÿc9")
+	},
+	{
+		REPLACEMENT_BIND_STRING_NO_ARGS("PURPLE", "ÿc;")
+	},
+	{
+		REPLACEMENT_BIND_STRING_NO_ARGS("DARK_GREEN", "ÿc:")
+	},
+	{
+		"STAT",
+		[](const smatch& match) -> function<string(SubContext&)> {
+			if (!match[2].length() || match[3].length()) {
+				return ReplacementAsBoundString(match.str());
+			}
+			int stat = stoi(match[2].str(), nullptr, 10);
+			if (stat > STAT_MAX) {
+				return ReplacementAsBoundString("");
+			}
+			return ReplacementAsStat(stat);
+		}
+	},
+	{
+		"SK",
+		[](const smatch& match) -> function<string(SubContext&)> {
+			if (!match[2].length() || match[3].length()) {
+				return ReplacementAsBoundString(match.str());
+			}
+			int stat = stoi(match[2].str(), nullptr, 10);
+			if (stat > SKILL_MAX) {
+				return ReplacementAsBoundString("");
+			}
+			return [stat](SubContext& ctx) -> string {
+				char buffer[16] = { 0 };
+				auto value = D2COMMON_GetUnitStat(ctx.info->item, STAT_SINGLESKILL, stat);
+				sprintf_s(buffer, "%d", value);
+				return buffer;
+			};
+		}
+	},
+	{
+		"OS",
+		[](const smatch& match) -> function<string(SubContext&)> {
+			if (!match[2].length() || match[3].length()) {
+				return ReplacementAsBoundString(match.str());
+			}
+			int stat = stoi(match[2].str(), nullptr, 10);
+			if (stat > SKILL_MAX) {
+				return ReplacementAsBoundString("");
+			}
+			return [stat](SubContext& ctx) -> string {
+				char buffer[16] = { 0 };
+				auto value = D2COMMON_GetUnitStat(ctx.info->item, STAT_NONCLASSSKILL, stat);
+				sprintf_s(buffer, "%d", value);
+				return buffer;
+			};
+		}
+	},
+	{
+		"CLSK",
+		[](const smatch& match) -> function<string(SubContext&)> {
+			if (!match[2].length() || match[3].length()) {
+				return ReplacementAsBoundString(match.str());
+			}
+			int stat = stoi(match[2].str(), nullptr, 10);
+			if (stat > SKILL_MAX) {
+				return ReplacementAsBoundString("");
+			}
+			return [stat](SubContext& ctx) -> string {
+				char buffer[16] = { 0 };
+				auto value = D2COMMON_GetUnitStat(ctx.info->item, STAT_CLASSSKILLS, stat);
+				sprintf_s(buffer, "%d", value);
+				return buffer;
+			};
+		}
+	},
+	{
+		"TABSK",
+		[](const smatch& match) -> function<string(SubContext&)> {
+			if (!match[2].length() || match[3].length()) {
+				return ReplacementAsBoundString(match.str());
+			}
+			int stat = stoi(match[2].str(), nullptr, 10);
+			if (stat > SKILL_MAX) {
+				return ReplacementAsBoundString("");
+			}
+			return [stat](SubContext& ctx) -> string {
+				char buffer[16] = { 0 };
+				auto value = D2COMMON_GetUnitStat(ctx.info->item, STAT_SKILLTAB, stat);
+				sprintf_s(buffer, "%d", value);
+				return buffer;
+			};
+		}
+	},
+	{
+		"CHARSTAT",
+		[](const smatch& match) -> function<string(SubContext&)> {
+			if (!match[2].length() || match[3].length()) {
+				return ReplacementAsBoundString(match.str());
+			}
+			int stat = stoi(match[2].str(), nullptr, 10);
+			if (stat > SKILL_MAX) {
+				return ReplacementAsBoundString("");
+			}
+			return [stat](SubContext& ctx) -> string {
+				char buffer[16] = { 0 };
+				auto value = D2COMMON_GetUnitStat(D2CLIENT_GetPlayerUnit(), stat, 0);
+				sprintf_s(buffer, "%d", value);
+				return buffer;
+			};
+		}
+	},
+	{
+		"MULTI",
+		[](const smatch& match) -> function<string(SubContext&)> {
+			if (!match[2].length() || !match[3].length()) {
+				return ReplacementAsBoundString(match.str());
+			}
+			int stat1 = stoi(match[2].str(), nullptr, 10);
+			int stat2 = stoi(match[3].str(), nullptr, 10);
+			if (stat1 > SKILL_MAX) {
+				return ReplacementAsBoundString("");
+			}
+			return [stat1, stat2](SubContext& ctx) -> string {
+				char buffer[16] = { 0 };
+				auto value = D2COMMON_GetUnitStat(ctx.info->item, stat1, stat2);
+				sprintf_s(buffer, "%d", value);
+				return buffer;
+			};
+		}
+	},
+	{
+		"CL",
+		[](const smatch& match) -> function<string(SubContext&)> {
+			if (match[2].length() || match[3].length()) {
+				return ReplacementAsBoundString(match.str());
+			}
+			return [](SubContext& ctx) -> string {
+				if (ctx.blockedNL) {
+					return "";
+				}
+				if (!ctx.limit || ctx.nlAllowed) {
+					return "\r";
+				}
+				if (ctx.nmagStaffmod) {
+					ctx.blockedNL = true;
+					return "\n";
+				}
+				return "";
+			};
+		}
+	},
+	{
+		"NL",
+		[](const smatch& match) -> function<string(SubContext&)> {
+			if (match[2].length() || match[3].length()) {
+				return ReplacementAsBoundString(match.str());
+			}
+			return [](SubContext& ctx) -> string {
+				if (ctx.blockedNL) {
+					return "";
+				}
+				if (!ctx.limit || ctx.nlAllowed) {
+					return "\n";
+				}
+				if (ctx.nmagStaffmod) {
+					ctx.blockedNL = true;
+					return "\n";
+				}
+				return "";
+			};
+		}
+	}
+};
+
+// Alias named stat with stat-id
+static bool AddReplacementKeys() {
+	for (const auto& p : stat_id_map) {
+		const auto stat = p.second;
+		substitutionMap[p.first] = [stat](const smatch& match) -> function<string(SubContext&)> {
+			return ReplacementAsStat(stat);
+		};
+	}
+	return true;
+}
+
+static bool builtReplacementMap = AddReplacementKeys();
+
+vector<function<string(SubContext&)>> BuildSubstitutionActions(const string& action)
+{
+	auto first = sregex_iterator(action.begin(), action.end(), substitutionRegex);
+	auto end = sregex_iterator();
+
+	vector<function<string(SubContext&)>> res;
+
+	size_t lastIndex = 0;
+	for (auto i = first; i != end; ++i) {
+		auto& match = *i;
+		if (lastIndex != match.position()) {
+			const auto str = action.substr(lastIndex, match.position() - lastIndex);
+			res.push_back([str](SubContext& ctx) -> string {
+				return str;
+			});
+		}
+		lastIndex = match.position() + match.length();
+		const auto& ret = substitutionMap.find(match[1]);
+		if (ret == substitutionMap.end()) {
+			const auto str = match.str();
+			res.push_back([str](SubContext& ctx) -> string {
+				return str;
+			});
+			continue;
+		}
+		const auto& fn = ret->second;
+		res.push_back(fn(match));
+	}
+
+	if (lastIndex != action.length()) {
+		const auto str = action.substr(lastIndex);
+		res.push_back([str](SubContext& ctx) -> string {
+			return str;
+		});
+	}
+
+	return res;
+}
+
 bool IsGem(ItemAttributes* attrs) { return (attrs->miscFlags & ITEM_GROUP_GEM) > 0; }
 
 BYTE GetGemLevel(ItemAttributes* attrs)
@@ -847,17 +1426,25 @@ BYTE RuneNumberFromItemCode(char* code) { return (BYTE)(((code[1] - '0') * 10) +
 string ItemDescLookupCache::make_cached_T(UnitItemInfo* uInfo)
 {
 	string new_name;
+	SubContext ctx(uInfo, new_name.c_str(), FALSE);
 	for (vector<Rule*>::const_iterator it = RuleList.begin(); it != RuleList.end(); it++)
 	{
 		if ((*it)->Evaluate(uInfo))
 		{
+			ctx.name = (*it)->ApplyDescription(ctx);
 			SubstituteNameVariables(uInfo, new_name, (*it)->action.description, FALSE);
 			if ((*it)->action.stopProcessing) { break; }
 		}
 	}
-	if (!new_name.empty()) { TrimItemText(uInfo, new_name, FALSE); }
 
-	return new_name;
+	if (!new_name.empty()) { TrimItemText(uInfo, new_name, FALSE); }
+	if (!ctx.name.empty()) { TrimItemText(uInfo, ctx.name, FALSE); }
+
+	if (ctx.name != new_name) {
+		return "wrong description applied";
+	}
+
+	return ctx.name;
 }
 
 string ItemDescLookupCache::to_str(const string& name)
@@ -879,17 +1466,24 @@ string ItemNameLookupCache::make_cached_T(UnitItemInfo* uInfo,
 	string new_name(name);
 	if (!new_name.empty() && new_name.front() == ' ') { new_name.erase(0, 1); }					// removes one leading space (happens on magic items without a prefix)
 	if (!new_name.empty() && new_name.back() == ' ') { new_name.erase(new_name.size() - 1, 1); }	// removes one trailing space (happens on magic items without a suffix)
+	SubContext ctx(uInfo, new_name.c_str(), TRUE);
 	for (vector<Rule*>::const_iterator it = RuleList.begin(); it != RuleList.end(); it++)
 	{
 		if ((*it)->Evaluate(uInfo))
 		{
+			ctx.name = (*it)->ApplyName(ctx);
 			SubstituteNameVariables(uInfo, new_name, (*it)->action.name, TRUE);
 			if ((*it)->action.stopProcessing) { break; }
 		}
 	}
 	if (!new_name.empty()) { TrimItemText(uInfo, new_name, TRUE); }
+	if (!ctx.name.empty()) { TrimItemText(uInfo, ctx.name, TRUE); }
 
-	return new_name;
+	if (ctx.name != new_name) {
+		return "wrong name applied";
+	}
+
+	return ctx.name;
 }
 
 string ItemNameLookupCache::to_str(const string& name)
@@ -1604,6 +2198,26 @@ Rule::Rule(vector<Condition*>& inputConditions,
 	if (!Convert()) {
 		root = -1;
 	}
+	name = BuildSubstitutionActions(action.name);
+	description = BuildSubstitutionActions(action.description);
+}
+
+string Rule::ApplyName(SubContext& ctx) {
+	stringstream ss;
+	for (const auto& fn : name) {
+		ss << fn(ctx);
+	}
+	ctx.Reset();
+	return ss.str();
+}
+
+string Rule::ApplyDescription(SubContext& ctx) {
+	stringstream ss;
+	for (const auto& fn : description) {
+		ss << fn(ctx);
+	}
+	ctx.Reset();
+	return ss.str();
 }
 
 bool Rule::Convert() {
