@@ -52,7 +52,10 @@ enum class FormulaOpCode
     LN,
     EXP,
     FLOOR,
-    CEIL
+    CEIL,
+    ROUND,
+    MIN,
+    MAX
 };
 
 template<typename T>
@@ -99,8 +102,6 @@ public:
     Formula(std::unique_ptr<FormulaNode<T>> r) : root(std::move(r))
     {
     }
-
-    ~Formula();
 
     FormulaStatus execute(T ctx, float& ret) const;
 };
@@ -244,7 +245,10 @@ class FormulaParser
         {"ln", FormulaOpCode::LN},
         {"exp", FormulaOpCode::EXP},
         {"floor", FormulaOpCode::FLOOR},
-        {"ceil", FormulaOpCode::CEIL}
+        {"ceil", FormulaOpCode::CEIL},
+        {"round", FormulaOpCode::ROUND},
+        {"min", FormulaOpCode::MIN},
+        {"max", FormulaOpCode::MAX}
     };
 
 public:
@@ -401,9 +405,9 @@ private:
             auto n = std::make_unique<FormulaNode<T>>(FormulaOpCode::RESOLVER);
             auto res = def->resolver;
             n->resolver = [res, ids](T ctx)
-                {
-                    return res(ctx, ids);
-                };
+            {
+                return res(ctx, ids);
+            };
             return n;
         }
 
@@ -490,6 +494,7 @@ private:
         case FormulaOpCode::EXP:
         case FormulaOpCode::FLOOR:
         case FormulaOpCode::CEIL:
+        case FormulaOpCode::ROUND:
         {
             ok = count == 1;
             break;
@@ -501,6 +506,8 @@ private:
         }
         case FormulaOpCode::AND:
         case FormulaOpCode::OR:
+        case FormulaOpCode::MIN:
+        case FormulaOpCode::MAX:
         {
             ok = count > 0;
             break;
@@ -525,201 +532,229 @@ float Formula<T>::eval(FormulaNode<T>* n, T ctx, FormulaStatus& e)
     }
 
     auto check = [&](size_t req)
+    {
+        if (n->children.size() < req)
         {
-            if (n->children.size() < req)
-            {
-                e = FormulaStatus::ARG_COUNT_ERROR;
-                return false;
-            }
-            return true;
-        };
+            e = FormulaStatus::ARG_COUNT_ERROR;
+            return false;
+        }
+        return true;
+    };
 
     switch (n->op)
     {
-    case FormulaOpCode::LITERAL:
-    {
-        return n->literalValue;
-    }
-    case FormulaOpCode::RESOLVER:
-    {
-        return n->resolver(ctx);
-    }
-    case FormulaOpCode::NEGATE:
-    {
-        if (!check(1))
+        case FormulaOpCode::LITERAL:
         {
-            return 0;
+            return n->literalValue;
         }
-        return -eval(n->children[0].get(), ctx, e);
-    }
-    case FormulaOpCode::NOT:
-    {
-        if (!check(1))
+        case FormulaOpCode::RESOLVER:
         {
-            return 0;
+            return n->resolver(ctx);
         }
-        return eval(n->children[0].get(), ctx, e) == 0;
-    }
-    case FormulaOpCode::ADD:
-    {
-        if (!check(2))
+        case FormulaOpCode::NEGATE:
         {
-            return 0;
-        }
-        return eval(n->children[0].get(), ctx, e) + eval(n->children[1].get(), ctx, e);
-    }
-    case FormulaOpCode::SUB:
-    {
-        if (!check(2))
-        {
-            return 0;
-        }
-        return eval(n->children[0].get(), ctx, e) - eval(n->children[1].get(), ctx, e);
-    }
-    case FormulaOpCode::MUL:
-    {
-        if (!check(2))
-        {
-            return 0;
-        }
-        return eval(n->children[0].get(), ctx, e) * eval(n->children[1].get(), ctx, e);
-    }
-    case FormulaOpCode::DIV:
-    {
-        if (!check(2))
-        {
-            return 0;
-        }
-        float d = eval(n->children[1].get(), ctx, e);
-        if (d == 0.0f)
-        {
-            e = FormulaStatus::MATH_ERROR;
-            return 0;
-        }
-        return eval(n->children[0].get(), ctx, e) / d;
-    }
-    case FormulaOpCode::POW:
-    {
-        if (!check(2))
-        {
-            return 0;
-        }
-        return std::pow(eval(n->children[0].get(), ctx, e), eval(n->children[1].get(), ctx, e));
-    }
-    case FormulaOpCode::EQ:
-    {
-        if (!check(2))
-        {
-            return 0;
-        }
-        return eval(n->children[0].get(), ctx, e) == eval(n->children[1].get(), ctx, e);
-    }
-    case FormulaOpCode::NE:
-    {
-        if (!check(2))
-        {
-            return 0;
-        }
-        return eval(n->children[0].get(), ctx, e) != eval(n->children[1].get(), ctx, e);
-    }
-    case FormulaOpCode::GT:
-    {
-        if (!check(2))
-        {
-            return 0;
-        }
-        return eval(n->children[0].get(), ctx, e) > eval(n->children[1].get(), ctx, e);
-    }
-    case FormulaOpCode::LT:
-    {
-        if (!check(2))
-        {
-            return 0;
-        }
-        return eval(n->children[0].get(), ctx, e) < eval(n->children[1].get(), ctx, e);
-    }
-    case FormulaOpCode::GE:
-    {
-        if (!check(2))
-        {
-            return 0;
-        }
-        return eval(n->children[0].get(), ctx, e) >= eval(n->children[1].get(), ctx, e);
-    }
-    case FormulaOpCode::LE:
-    {
-        if (!check(2))
-        {
-            return 0;
-        }
-        return eval(n->children[0].get(), ctx, e) <= eval(n->children[1].get(), ctx, e);
-    }
-    case FormulaOpCode::IF:
-    {
-        if (!check(3))
-        {
-            return 0;
-        }
-        return (eval(n->children[0].get(), ctx, e) != 0) ? eval(n->children[1].get(), ctx, e) : eval(n->children[2].get(), ctx, e);
-    }
-    case FormulaOpCode::AND:
-    {
-        for (auto& c : n->children)
-        {
-            if (eval(c.get(), ctx, e) == 0)
+            if (!check(1))
             {
                 return 0;
             }
+            return -eval(n->children[0].get(), ctx, e);
         }
-        return 1;
-    }
-    case FormulaOpCode::OR:
-    {
-        for (auto& c : n->children)
+        case FormulaOpCode::NOT:
         {
-            if (eval(c.get(), ctx, e) != 0)
+            if (!check(1))
             {
-                return 1;
+                return 0;
             }
+            return eval(n->children[0].get(), ctx, e) == 0;
         }
-        return 0;
-    }
-    case FormulaOpCode::LN:
-    {
-        if (!check(1))
+        case FormulaOpCode::ADD:
+        {
+            if (!check(2))
+            {
+                return 0;
+            }
+            return eval(n->children[0].get(), ctx, e) + eval(n->children[1].get(), ctx, e);
+        }
+        case FormulaOpCode::SUB:
+        {
+            if (!check(2))
+            {
+                return 0;
+            }
+            return eval(n->children[0].get(), ctx, e) - eval(n->children[1].get(), ctx, e);
+        }
+        case FormulaOpCode::MUL:
+        {
+            if (!check(2))
+            {
+                return 0;
+            }
+            return eval(n->children[0].get(), ctx, e) * eval(n->children[1].get(), ctx, e);
+        }
+        case FormulaOpCode::DIV:
+        {
+            if (!check(2))
+            {
+                return 0;
+            }
+            float d = eval(n->children[1].get(), ctx, e);
+            if (d == 0.0f)
+            {
+                e = FormulaStatus::MATH_ERROR;
+                return 0;
+            }
+            return eval(n->children[0].get(), ctx, e) / d;
+        }
+        case FormulaOpCode::POW:
+        {
+            if (!check(2))
+            {
+                return 0;
+            }
+            return std::pow(eval(n->children[0].get(), ctx, e), eval(n->children[1].get(), ctx, e));
+        }
+        case FormulaOpCode::EQ:
+        {
+            if (!check(2))
+            {
+                return 0;
+            }
+            return eval(n->children[0].get(), ctx, e) == eval(n->children[1].get(), ctx, e);
+        }
+        case FormulaOpCode::NE:
+        {
+            if (!check(2))
+            {
+                return 0;
+            }
+            return eval(n->children[0].get(), ctx, e) != eval(n->children[1].get(), ctx, e);
+        }
+        case FormulaOpCode::GT:
+        {
+            if (!check(2))
+            {
+                return 0;
+            }
+            return eval(n->children[0].get(), ctx, e) > eval(n->children[1].get(), ctx, e);
+        }
+        case FormulaOpCode::LT:
+        {
+            if (!check(2))
+            {
+                return 0;
+            }
+            return eval(n->children[0].get(), ctx, e) < eval(n->children[1].get(), ctx, e);
+        }
+        case FormulaOpCode::GE:
+        {
+            if (!check(2))
+            {
+                return 0;
+            }
+            return eval(n->children[0].get(), ctx, e) >= eval(n->children[1].get(), ctx, e);
+        }
+        case FormulaOpCode::LE:
+        {
+            if (!check(2))
+            {
+                return 0;
+            }
+            return eval(n->children[0].get(), ctx, e) <= eval(n->children[1].get(), ctx, e);
+        }
+        case FormulaOpCode::IF:
+        {
+            if (!check(3))
+            {
+                return 0;
+            }
+            return (eval(n->children[0].get(), ctx, e) != 0) ? eval(n->children[1].get(), ctx, e) : eval(n->children[2].get(), ctx, e);
+        }
+        case FormulaOpCode::AND:
+        {
+            for (auto& c : n->children)
+            {
+                if (eval(c.get(), ctx, e) == 0)
+                {
+                    return 0;
+                }
+            }
+            return 1;
+        }
+        case FormulaOpCode::OR:
+        {
+            for (auto& c : n->children)
+            {
+                if (eval(c.get(), ctx, e) != 0)
+                {
+                    return 1;
+                }
+            }
+            return 0;
+        }
+        case FormulaOpCode::LN:
+        {
+            if (!check(1))
+            {
+                return 0;
+            }
+            return std::log(eval(n->children[0].get(), ctx, e));
+        }
+        case FormulaOpCode::EXP:
+        {
+            if (!check(1))
+            {
+                return 0;
+            }
+            return std::exp(eval(n->children[0].get(), ctx, e));
+        }
+        case FormulaOpCode::FLOOR:
+        {
+            if (!check(1))
+            {
+                return 0;
+            }
+            return std::floor(eval(n->children[0].get(), ctx, e));
+        }
+        case FormulaOpCode::CEIL:
+        {
+            if (!check(1))
+            {
+                return 0;
+            }
+            return std::ceil(eval(n->children[0].get(), ctx, e));
+        }
+        case FormulaOpCode::ROUND:
+        {
+            if (!check(1))
+            {
+                return 0;
+            }
+            return std::round(eval(n->children[0].get(), ctx, e));
+        }
+        case FormulaOpCode::MIN:
+        {
+            float res = FLT_MAX;
+            for (auto& c : n->children)
+            {
+                float v = eval(c.get(), ctx, e);
+                res = min(res, v);
+            }
+            return res;
+        }
+        case FormulaOpCode::MAX:
+        {
+            float res = FLT_MIN;
+            for (auto& c : n->children)
+            {
+                float v = eval(c.get(), ctx, e);
+                res = max(res, v);
+            }
+            return res;
+        }
+        default:
         {
             return 0;
         }
-        return std::log(eval(n->children[0].get(), ctx, e));
-    }
-    case FormulaOpCode::EXP:
-    {
-        if (!check(1))
-        {
-            return 0;
-        }
-        return std::exp(eval(n->children[0].get(), ctx, e));
-    }
-    case FormulaOpCode::FLOOR:
-    {
-        if (!check(1))
-        {
-            return 0;
-        }
-        return std::floor(eval(n->children[0].get(), ctx, e));
-    }
-    case FormulaOpCode::CEIL:
-    {
-        if (!check(1))
-        {
-            return 0;
-        }
-        return std::ceil(eval(n->children[0].get(), ctx, e));
-    }
-    default:
-    {
-        return 0;
-    }
     }
 }
 
@@ -789,10 +824,4 @@ FormulaStatus Formula<T>::execute(T ctx, float& ret) const
     FormulaStatus e = FormulaStatus::OK;
     ret = eval(root.get(), ctx, e);
     return e;
-}
-
-template<typename T>
-Formula<T>::~Formula()
-{
-    root.release();
 }
