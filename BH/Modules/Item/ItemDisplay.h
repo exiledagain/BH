@@ -27,7 +27,7 @@ struct UnitItemInfo
 	ItemAttributes* attrs;
 };
 
-typedef UnitItemInfo* FormulaContext;
+typedef UnitItemInfo FormulaContext;
 extern std::map<std::string, int> UnknownItemCodes;
 
 enum ConditionType
