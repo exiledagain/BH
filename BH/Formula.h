@@ -688,7 +688,7 @@ float Formula<T>::eval(const FormulaNode<T>* n, T ctx, FormulaStatus& e)
             {
                 return 0;
             }
-            return (eval(n->children[0].get(), ctx, e) != 0) ? eval(n->children[1].get(), ctx, e) : eval(n->children[2].get(), ctx, e);
+            return Formula<T>::IsTrue(eval(n->children[0].get(), ctx, e)) ? eval(n->children[1].get(), ctx, e) : eval(n->children[2].get(), ctx, e);
         }
         case FormulaOpCode::AND:
         {
