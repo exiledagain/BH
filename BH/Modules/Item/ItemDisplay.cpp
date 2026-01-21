@@ -8,6 +8,80 @@
 
 #define MAP_COLOR_WHITE     0x20
 
+// must be lowercase
+std::vector<FormulaVarDefinition<FormulaContext>> formulaVarDefs = {
+	{ "stat", 1, [](UnitItemInfo* ctx, const std::vector<int>& ids) -> float
+		{
+			auto stat = ids[0];
+			int tmpVal = D2COMMON_GetUnitStat(ctx->item, stat, 0);
+			if (stat == STAT_MAXHP || stat == STAT_MAXMANA)
+			{
+				tmpVal /= 256;
+			}
+			else if (
+				stat == STAT_ENHANCEDDEFENSE ||				// return 0
+				stat == STAT_ENHANCEDMAXIMUMDAMAGE ||		// return 0
+				stat == STAT_ENHANCEDMINIMUMDAMAGE ||		// return 0
+				stat == STAT_MINIMUMDAMAGE ||				// return base min 1h weapon damage
+				stat == STAT_MAXIMUMDAMAGE ||				// return base max 1h weapon damage
+				stat == STAT_SECONDARYMINIMUMDAMAGE ||		// return base min 2h weapon damage
+				stat == STAT_SECONDARYMAXIMUMDAMAGE			// return base max 2h weapon damage
+				)
+			{
+				tmpVal = GetStatFromList(ctx, stat);
+			}
+			return (float)tmpVal;
+		}
+	},
+	{ "multi", 2, [](UnitItemInfo* ctx, const std::vector<int>& ids) -> float
+		{
+			auto stat = ids[0];
+			auto layer = ids[1];
+			int tmpVal = D2COMMON_GetUnitStat(ctx->item, stat, layer);
+			if (stat == STAT_MAXHP || stat == STAT_MAXMANA)
+			{
+				tmpVal /= 256;
+			}
+			else if (
+				stat == STAT_ENHANCEDDEFENSE ||				// return 0
+				stat == STAT_ENHANCEDMAXIMUMDAMAGE ||		// return 0
+				stat == STAT_ENHANCEDMINIMUMDAMAGE ||		// return 0
+				stat == STAT_MINIMUMDAMAGE ||				// return base min 1h weapon damage
+				stat == STAT_MAXIMUMDAMAGE ||				// return base max 1h weapon damage
+				stat == STAT_SECONDARYMINIMUMDAMAGE ||		// return base min 2h weapon damage
+				stat == STAT_SECONDARYMAXIMUMDAMAGE			// return base max 2h weapon damage
+				)
+			{
+				tmpVal = GetStatFromList(ctx, stat);
+			}
+			return (float)tmpVal;
+		}
+	},
+	{ "charstat", 1, [](UnitItemInfo* ctx, const std::vector<int>& ids) -> float
+		{
+			auto stat = ids[0];
+			int tmpVal = D2COMMON_GetUnitStat(D2CLIENT_GetPlayerUnit(), stat, 0);
+			if (stat == STAT_MAXHP || stat == STAT_MAXMANA)
+			{
+				tmpVal /= 256;
+			}
+			else if (
+				stat == STAT_ENHANCEDDEFENSE ||				// return 0
+				stat == STAT_ENHANCEDMAXIMUMDAMAGE ||		// return 0
+				stat == STAT_ENHANCEDMINIMUMDAMAGE ||		// return 0
+				stat == STAT_MINIMUMDAMAGE ||				// return base min 1h weapon damage
+				stat == STAT_MAXIMUMDAMAGE ||				// return base max 1h weapon damage
+				stat == STAT_SECONDARYMINIMUMDAMAGE ||		// return base min 2h weapon damage
+				stat == STAT_SECONDARYMAXIMUMDAMAGE			// return base max 2h weapon damage
+				)
+			{
+				tmpVal = GetStatFromList(ctx, stat);
+			}
+			return (float)tmpVal;
+		}
+	},
+};
+
 // All colors here must also be defined in ReplacementMap
 #define MAP_COLOR_REPLACEMENTS	\
 	{"WHITE", 0x20},		\
@@ -1858,6 +1932,90 @@ bool IntegerCompare(int Lvalue,
 	}
 }
 
+void RegisterFormula(const std::string& ref, std::unique_ptr<Formula<FormulaContext>>& ptr)
+{
+	formulaMap.insert({ ref, std::move(ptr) });
+	FormulaReplacementMap.insert_or_assign(ref, ReplacementSpec{ 0, ReplacementSpec::ReplaceBindFormula(formulaMap.find(ref)->second) });
+}
+
+const std::string IslandIdentifier = "$f(";
+const std::string IslandPrefix = "ISLAND_";
+vector<char> IslandSuffix = { 'A' - 1 };
+
+string GetNextFormulaIslandRef()
+{
+	for (size_t i = 0; i < IslandSuffix.size(); ++i)
+	{
+		if (IslandSuffix[i] == 'Z')
+		{
+			if (i + 1 >= IslandSuffix.size())
+			{
+				IslandSuffix.push_back('A' - 1);
+			}
+			IslandSuffix[i] = 'A';
+		}
+		else
+		{
+			IslandSuffix[i] += 1;
+			break;
+		}
+	}
+
+	string suffix = "";
+	for (size_t i = 0; i < IslandSuffix.size(); ++i)
+	{
+		suffix += IslandSuffix[i];
+	}
+
+	return IslandPrefix + suffix;
+}
+
+void ReplaceFormulaIslands(std::string& text, std::string& pre, std::string& suf)
+{
+	size_t offset = 0;
+	while (offset < text.length())
+	{
+		const auto start = text.find(IslandIdentifier, offset);
+		if (start == string::npos)
+		{
+			return;
+		}
+		size_t i = start + 3;
+		for (size_t count = 1; i < text.length(); ++i)
+		{
+			if (text[i] == '(')
+			{
+				count += 1;
+			}
+			else if (text[i] == ')')
+			{
+				count -= 1;
+			}
+			if (count == 0)
+			{
+				break;
+			}
+		}
+		if (i < text.length())
+		{
+			std::unique_ptr<Formula<FormulaContext>> out;
+			size_t len = i - (start + 3);
+			if (Formula<FormulaContext>::Compile(text.substr(start + 3, len), out, formulaVarDefs) != FormulaStatus::OK)
+			{
+				break;
+			}
+			const auto ref = GetNextFormulaIslandRef();
+			RegisterFormula(ref, out);
+			const auto replacement = pre + ref + suf;
+			text.replace(start, len + 4, replacement);
+			offset = start + replacement.length();
+			continue;
+		}
+		// found start pattern but didn't match ')'
+		offset = start + 3;
+	}
+}
+
 namespace ItemDisplay
 {
 	bool item_display_initialized = false;
@@ -1874,6 +2032,8 @@ namespace ItemDisplay
 		formulas.clear();
 		formulaMap.clear();
 		FormulaReplacementMap.clear();
+		IslandSuffix.clear();
+		IslandSuffix.push_back('A' - 1);
 		ResetCaches();
 		BH::lootFilter->ReadMapList("Alias", aliases);
 		BH::lootFilter->ReadMapList("Formula", formulas);
@@ -1888,79 +2048,6 @@ namespace ItemDisplay
 				aliases[i].first.erase(aliases[i].first.find(" "));
 		}
 
-		// must be lowercase
-		std::vector<FormulaVarDefinition<FormulaContext>> defs = {
-			{ "stat", 1, [](UnitItemInfo* ctx, const std::vector<int>& ids) -> float
-				{
-					auto stat = ids[0];
-					int tmpVal = D2COMMON_GetUnitStat(ctx->item, stat, 0);
-					if (stat == STAT_MAXHP || stat == STAT_MAXMANA)
-					{
-						tmpVal /= 256;
-					}
-					else if (
-						stat == STAT_ENHANCEDDEFENSE ||				// return 0
-						stat == STAT_ENHANCEDMAXIMUMDAMAGE ||		// return 0
-						stat == STAT_ENHANCEDMINIMUMDAMAGE ||		// return 0
-						stat == STAT_MINIMUMDAMAGE ||				// return base min 1h weapon damage
-						stat == STAT_MAXIMUMDAMAGE ||				// return base max 1h weapon damage
-						stat == STAT_SECONDARYMINIMUMDAMAGE ||		// return base min 2h weapon damage
-						stat == STAT_SECONDARYMAXIMUMDAMAGE			// return base max 2h weapon damage
-						)
-					{
-						tmpVal = GetStatFromList(ctx, stat);
-					}
-					return (float)tmpVal;
-				}
-			},
-			{ "multi", 2, [](UnitItemInfo* ctx, const std::vector<int>& ids) -> float
-				{
-					auto stat = ids[0];
-					auto layer = ids[1];
-					int tmpVal = D2COMMON_GetUnitStat(ctx->item, stat, layer);
-					if (stat == STAT_MAXHP || stat == STAT_MAXMANA)
-					{
-						tmpVal /= 256;
-					}
-					else if (
-						stat == STAT_ENHANCEDDEFENSE ||				// return 0
-						stat == STAT_ENHANCEDMAXIMUMDAMAGE ||		// return 0
-						stat == STAT_ENHANCEDMINIMUMDAMAGE ||		// return 0
-						stat == STAT_MINIMUMDAMAGE ||				// return base min 1h weapon damage
-						stat == STAT_MAXIMUMDAMAGE ||				// return base max 1h weapon damage
-						stat == STAT_SECONDARYMINIMUMDAMAGE ||		// return base min 2h weapon damage
-						stat == STAT_SECONDARYMAXIMUMDAMAGE			// return base max 2h weapon damage
-						)
-					{
-						tmpVal = GetStatFromList(ctx, stat);
-					}
-					return (float)tmpVal;
-				}
-			},
-			{ "charstat", 1, [](UnitItemInfo* ctx, const std::vector<int>& ids) -> float
-				{
-					auto stat = ids[0];
-					int tmpVal = D2COMMON_GetUnitStat(D2CLIENT_GetPlayerUnit(), stat, 0);
-					if (stat == STAT_MAXHP || stat == STAT_MAXMANA)
-					{
-						tmpVal /= 256;
-					}
-					else if (
-						stat == STAT_ENHANCEDDEFENSE ||				// return 0
-						stat == STAT_ENHANCEDMAXIMUMDAMAGE ||		// return 0
-						stat == STAT_ENHANCEDMINIMUMDAMAGE ||		// return 0
-						stat == STAT_MINIMUMDAMAGE ||				// return base min 1h weapon damage
-						stat == STAT_MAXIMUMDAMAGE ||				// return base max 1h weapon damage
-						stat == STAT_SECONDARYMINIMUMDAMAGE ||		// return base min 2h weapon damage
-						stat == STAT_SECONDARYMAXIMUMDAMAGE			// return base max 2h weapon damage
-						)
-					{
-						tmpVal = GetStatFromList(ctx, stat);
-					}
-					return (float)tmpVal;
-				}
-			},
-		};
 		for (const auto& f : formulas)
 		{
 			const auto key = f.first;
@@ -1970,15 +2057,16 @@ namespace ItemDisplay
 			transform(formulaRef.begin(), formulaRef.end(), formulaRef.begin(), toupper);
 
 			std::unique_ptr<Formula<FormulaContext>> out;
-			if (Formula<FormulaContext>::Compile(text, out, defs) != FormulaStatus::OK)
+			if (Formula<FormulaContext>::Compile(text, out, formulaVarDefs) != FormulaStatus::OK)
 			{
 				continue;
 			}
 
-			formulaMap.insert({ formulaRef, std::move(out) });
-			FormulaReplacementMap.insert_or_assign(formulaRef, ReplacementSpec { 0, ReplacementSpec::ReplaceBindFormula(formulaMap.find(formulaRef)->second) });
+			RegisterFormula(formulaRef, out);
 		}
 
+		std::string percent = "%";
+		std::string empty = "";
 		for (unsigned int i = 0; i < rules.size(); i++)
 		{
 			for (auto alias : aliases)
@@ -1993,6 +2081,10 @@ namespace ItemDisplay
 				while (rules[i].second.find("%" + alias.first + "%") != string::npos)
 					rules[i].second.replace(rules[i].second.find("%" + alias.first + "%"), alias.first.length() + 2, alias.second);
 			}
+
+			// find inline formula islands
+			ReplaceFormulaIslands(rules[i].first, empty, empty);
+			ReplaceFormulaIslands(rules[i].second, percent, percent);
 
 			string         buf;
 			stringstream   ss(rules[i].first);
@@ -3753,6 +3845,10 @@ bool FormulaCondition::EvaluateInternal(UnitItemInfo* uInfo,
 	if (f->execute(uInfo, out) != FormulaStatus::OK)
 	{
 		return false;
+	}
+	if (operation == NONE)
+	{
+		return Formula<FormulaContext>::IsTrue(out);
 	}
 	int value = out;
 	return IntegerCompare(value, operation, targetStat, targetStat2);

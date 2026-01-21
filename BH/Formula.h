@@ -19,6 +19,7 @@ enum class FormulaStatus
 
 enum class FormulaTokenType
 {
+    NONE,
     NUMBER,
     VARIABLE,
     OP,
@@ -55,7 +56,8 @@ enum class FormulaOpCode
     CEIL,
     ROUND,
     MIN,
-    MAX
+    MAX,
+    MOD
 };
 
 template<typename T>
@@ -92,7 +94,7 @@ struct FormulaNode
 template<typename T>
 class Formula
 {
-    static float eval(FormulaNode<T>* n, T ctx, FormulaStatus& e);
+    static float eval(const FormulaNode<T>* n, T ctx, FormulaStatus& e);
     static void optimize(std::unique_ptr<FormulaNode<T>>& n);
 
     std::unique_ptr<FormulaNode<T>> root;
@@ -104,12 +106,17 @@ public:
     }
 
     FormulaStatus execute(T ctx, float& ret) const;
+
+    static bool IsTrue(float f)
+    {
+        return f != 0.0f;
+    }
 };
 
 struct FormulaToken
 {
-    FormulaTokenType type;
-    std::string value;
+    const FormulaTokenType type;
+    const std::string value;
 };
 
 class FormulaTokenStream
@@ -138,12 +145,16 @@ public:
     {
         return pos >= tokens.size() || peek().type == FormulaTokenType::T_EOF;
     }
+    size_t position() const
+    {
+        return pos;
+    }
 };
 
 class FormulaScanner
 {
 public:
-    static FormulaStatus tokenize(const std::string& input, FormulaTokenStream& outStream)
+    static FormulaStatus tokenize(const std::string& input, FormulaTokenStream& stream)
     {
         size_t i = 0;
         while (i < input.length())
@@ -159,32 +170,32 @@ public:
                 std::string op2 = input.substr(i, 2);
                 if (op2 == "==" || op2 == "!=" || op2 == ">=" || op2 == "<=")
                 {
-                    outStream.add({ FormulaTokenType::OP, op2 });
+                    stream.add({ FormulaTokenType::OP, op2 });
                     i += 2;
                     continue;
                 }
             }
             if (std::strchr("+-*/^<>!", input[i]))
             {
-                outStream.add({ FormulaTokenType::OP, std::string(1, input[i]) });
+                stream.add({ FormulaTokenType::OP, std::string(1, input[i]) });
                 i++;
                 continue;
             }
             if (input[i] == '(')
             {
-                outStream.add({ FormulaTokenType::OPEN_P, "(" });
+                stream.add({ FormulaTokenType::OPEN_P, "(" });
                 i++;
                 continue;
             }
             if (input[i] == ')')
             {
-                outStream.add({ FormulaTokenType::CLOSE_P, ")" });
+                stream.add({ FormulaTokenType::CLOSE_P, ")" });
                 i++;
                 continue;
             }
             if (input[i] == ',')
             {
-                outStream.add({ FormulaTokenType::COMMA, "," });
+                stream.add({ FormulaTokenType::COMMA, "," });
                 i++;
                 continue;
             }
@@ -196,7 +207,7 @@ public:
                 {
                     i++;
                 }
-                outStream.add({ FormulaTokenType::NUMBER, input.substr(start, i - start) });
+                stream.add({ FormulaTokenType::NUMBER, input.substr(start, i - start) });
                 continue;
             }
 
@@ -207,7 +218,7 @@ public:
                 {
                     i++;
                 }
-                outStream.add({ FormulaTokenType::VARIABLE, input.substr(start, i - start) });
+                stream.add({ FormulaTokenType::VARIABLE, input.substr(start, i - start) });
                 continue;
             }
             return FormulaStatus::LEXICAL_ERROR;
@@ -248,7 +259,8 @@ class FormulaParser
         {"ceil", FormulaOpCode::CEIL},
         {"round", FormulaOpCode::ROUND},
         {"min", FormulaOpCode::MIN},
-        {"max", FormulaOpCode::MAX}
+        {"max", FormulaOpCode::MAX},
+        {"mod", FormulaOpCode::MOD}
     };
 
 public:
@@ -270,7 +282,7 @@ public:
     }
 
 private:
-    std::unique_ptr<FormulaNode<T>> parseExpression(int minPrec)
+    std::unique_ptr<FormulaNode<T>> parseExpression(const int minPrec)
     {
         auto left = parseUnary();
         if (!left)
@@ -278,24 +290,28 @@ private:
             return nullptr;
         }
 
-        while (true)
+        size_t lastPos = -1;
+        while (lastPos != stream.position())
         {
+            lastPos = stream.position();
             const FormulaToken& t = stream.peek();
             if (t.type != FormulaTokenType::OP || opTable.count(t.value) == 0)
             {
                 break;
             }
 
-            auto attr = opTable.at(t.value);
-            if (attr.second < minPrec)
+            auto& opt = opTable.at(t.value);
+            const auto& prec = opt.second;
+            if (prec < minPrec)
             {
                 break;
             }
+            const auto& op = opt.first;
 
             stream.advance();
-            auto n = std::make_unique<FormulaNode<T>>(attr.first);
+            auto n = std::make_unique<FormulaNode<T>>(op);
             n->children.push_back(std::move(left));
-            auto right = parseExpression(attr.second + 1);
+            auto right = parseExpression(prec + (op != FormulaOpCode::POW));
             if (!right)
             {
                 err = FormulaStatus::SYNTAX_ERROR;
@@ -438,7 +454,7 @@ private:
         return nullptr;
     }
 
-    std::unique_ptr<FormulaNode<T>> parseFunction(std::string name)
+    std::unique_ptr<FormulaNode<T>> parseFunction(const std::string& name)
     {
         FormulaOpCode code = fnTable.at(name);
         stream.advance();
@@ -450,8 +466,10 @@ private:
             stream.advance();
             if (stream.peek().type != FormulaTokenType::CLOSE_P)
             {
-                while (true)
+                size_t lastPos = -1;
+                while (lastPos != stream.position())
                 {
+                    lastPos = stream.position();
                     auto arg = parseExpression(0);
                     if (!arg)
                     {
@@ -463,11 +481,9 @@ private:
                     if (stream.peek().type == FormulaTokenType::COMMA)
                     {
                         stream.advance();
+                        continue;
                     }
-                    else
-                    {
-                        break;
-                    }
+                    break;
                 }
             }
             if (stream.peek().type == FormulaTokenType::CLOSE_P)
@@ -490,28 +506,33 @@ private:
         bool ok = false;
         switch (code)
         {
-        case FormulaOpCode::LN:
-        case FormulaOpCode::EXP:
-        case FormulaOpCode::FLOOR:
-        case FormulaOpCode::CEIL:
-        case FormulaOpCode::ROUND:
-        {
-            ok = count == 1;
-            break;
-        }
-        case FormulaOpCode::IF:
-        {
-            ok = count == 3;
-            break;
-        }
-        case FormulaOpCode::AND:
-        case FormulaOpCode::OR:
-        case FormulaOpCode::MIN:
-        case FormulaOpCode::MAX:
-        {
-            ok = count > 0;
-            break;
-        }
+            case FormulaOpCode::LN:
+            case FormulaOpCode::EXP:
+            case FormulaOpCode::FLOOR:
+            case FormulaOpCode::CEIL:
+            case FormulaOpCode::ROUND:
+            {
+                ok = count == 1;
+                break;
+            }
+            case FormulaOpCode::MOD:
+            {
+                ok = count == 2;
+                break;
+            }
+            case FormulaOpCode::IF:
+            {
+                ok = count == 3;
+                break;
+            }
+            case FormulaOpCode::AND:
+            case FormulaOpCode::OR:
+            case FormulaOpCode::MIN:
+            case FormulaOpCode::MAX:
+            {
+                ok = count > 0;
+                break;
+            }
         }
         if (!ok)
         {
@@ -524,7 +545,7 @@ private:
 };
 
 template<typename T>
-float Formula<T>::eval(FormulaNode<T>* n, T ctx, FormulaStatus& e)
+float Formula<T>::eval(const FormulaNode<T>* n, T ctx, FormulaStatus& e)
 {
     if (e != FormulaStatus::OK || !n)
     {
@@ -673,7 +694,7 @@ float Formula<T>::eval(FormulaNode<T>* n, T ctx, FormulaStatus& e)
         {
             for (auto& c : n->children)
             {
-                if (eval(c.get(), ctx, e) == 0)
+                if (!Formula<T>::IsTrue(eval(c.get(), ctx, e)))
                 {
                     return 0;
                 }
@@ -684,7 +705,7 @@ float Formula<T>::eval(FormulaNode<T>* n, T ctx, FormulaStatus& e)
         {
             for (auto& c : n->children)
             {
-                if (eval(c.get(), ctx, e) != 0)
+                if (Formula<T>::IsTrue(eval(c.get(), ctx, e)))
                 {
                     return 1;
                 }
@@ -751,6 +772,14 @@ float Formula<T>::eval(FormulaNode<T>* n, T ctx, FormulaStatus& e)
             }
             return res;
         }
+        case FormulaOpCode::MOD:
+        {
+            if (!check(2))
+            {
+                return 0;
+            }
+            return std::fmodf(eval(n->children[0].get(), ctx, e), eval(n->children[1].get(), ctx, e));
+        }
         default:
         {
             return 0;
@@ -788,6 +817,40 @@ void Formula<T>::optimize(std::unique_ptr<FormulaNode<T>>& n)
             n->children.clear();
             n->op = FormulaOpCode::LITERAL;
             n->literalValue = val;
+        }
+    }
+    else if (n->op == FormulaOpCode::IF && n->children[0]->op == FormulaOpCode::LITERAL)
+    {
+        if (Formula<T>::IsTrue(n->children[0]->literalValue))
+        {
+            n = std::move(n->children[1]);
+        }
+        else
+        {
+            n = std::move(n->children[2]);
+        }
+    }
+    else if (n->op == FormulaOpCode::AND)
+    {
+        for (auto& c : n->children)
+        {
+            if (c->op == FormulaOpCode::LITERAL && !Formula<T>::IsTrue(c->literalValue))
+            {
+                n = std::move(c);
+                break;
+            }
+        }
+    }
+    else if (n->op == FormulaOpCode::OR)
+    {
+        for (auto& c : n->children)
+        {
+            if (c->op == FormulaOpCode::LITERAL && Formula<T>::IsTrue(c->literalValue))
+            {
+                n = std::move(c);
+                n->literalValue = 1.0f;
+                break;
+            }
         }
     }
 }
