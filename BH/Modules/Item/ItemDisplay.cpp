@@ -518,6 +518,7 @@ enum FilterCondition
 	COND_ADD,
 	COND_TRUE,
 	COND_FALSE,
+	COND_FORMULA,
 
 	COND_NULL
 };
@@ -706,7 +707,7 @@ struct SkillReplace {
 };
 
 // case-sensitive searches for AddCondition
-const unordered_map<string, const SkillReplace> skills = {
+const unordered_map<string, SkillReplace> skills = {
 	{{"LIFE"}, { STAT_MAXHP, 0}},
 	{{"MANA"}, { STAT_MAXMANA, 0}},
 	{{"STR"}, { STAT_STRENGTH, 0}},
@@ -726,7 +727,10 @@ const unordered_map<string, const SkillReplace> skills = {
 	{{"MULTI"}, { ~0UL, 2}},
 };
 
+unordered_map<string, std::shared_ptr<Formula<FormulaContext>>> formulaMap;
+
 std::map<std::string, int>   UnknownItemCodes;
+vector<pair<string, string>> formulas;
 vector<pair<string, string>> aliases;
 vector<pair<string, string>> rules;
 vector<Rule*>                RuleList;
@@ -934,6 +938,7 @@ struct ReplacementSpec {
 	static function<string(ReplaceContext& ctx, const ReplacementValue& val)> ReplaceHDTextDependentColor(const string& primary, const string& secondary);
 	static function<string(ReplaceContext& ctx, const ReplacementValue& val)> ReplaceBindString(const string& str);
 	static function<string(ReplaceContext& ctx, const ReplacementValue& val)> ReplaceNamedStat(int id);
+	static function<string(ReplaceContext& ctx, const ReplacementValue& val)> ReplaceBindFormula(shared_ptr<Formula<FormulaContext>> f);
 };
 
 unordered_map<string, ReplacementSpec> ReplacementMap = {
@@ -1024,6 +1029,8 @@ unordered_map<string, ReplacementSpec> ReplacementMap = {
 	{ "DARK_GREEN", { 0, ReplacementSpec::ReplaceBindString("ÿc:") } },
 };
 
+unordered_map<string, ReplacementSpec> FormulaReplacementMap;
+
 regex ReplacementRegex("%([A-Z_]+)(?:(\\d{1,9})(?:,(\\d{1,9}))?)?%", regex::ECMAScript);
 vector<ReplacementValue> BuildReplacementActions(const string& action)
 {
@@ -1068,10 +1075,13 @@ ReplacementValue ReplacementSpec::MakeReplacementValue(const string& str)
 
 ReplacementValue ReplacementSpec::MakeReplacementValue(const smatch& match, bool& fail)
 {
-	const auto& spec = ReplacementMap.find(match[1]);
+	auto& spec = ReplacementMap.find(match[1]);
 	if (spec == ReplacementMap.end()) {
-		fail = true;
-		return ReplacementValue(match.str(), 0, 0, ReplacementSpec::ReplaceNone);
+		spec = FormulaReplacementMap.find(match[1]);
+		if (spec == FormulaReplacementMap.end()) {
+			fail = true;
+			return ReplacementValue(match.str(), 0, 0, ReplacementSpec::ReplaceNone);
+		}
 	}
 	const auto& replacer = spec->second;
 	const int count = (match[2].length() != 0) + (match[3].length() != 0);
@@ -1095,6 +1105,27 @@ function<string(ReplaceContext& ctx, const ReplacementValue& val)> ReplacementSp
 {
 	return [str](ReplaceContext& ctx, const ReplacementValue& val) -> string {
 		return str;
+	};
+}
+
+function<string(ReplaceContext& ctx, const ReplacementValue& val)> ReplacementSpec::ReplaceBindFormula(shared_ptr<Formula<FormulaContext>> f)
+{
+	return [f](ReplaceContext& ctx, const ReplacementValue& val) -> string {
+		float out = 0.0f;
+		if (f->execute(ctx.info, out) != FormulaStatus::OK)
+		{
+			return "";
+		}
+		// limit to two sig figs
+		char buffer[16];
+		int shifted = std::round(out * 100);
+		if (shifted % 100 == 0)
+		{
+			snprintf(buffer, 16, "%d", shifted / 100);
+			return buffer;
+		}
+		snprintf(buffer, 16, "%.2f", out);
+		return buffer;
 	};
 }
 
@@ -1840,8 +1871,12 @@ namespace ItemDisplay
 		item_display_initialized = true;
 		rules.clear();
 		aliases.clear();
+		formulas.clear();
+		formulaMap.clear();
+		FormulaReplacementMap.clear();
 		ResetCaches();
 		BH::lootFilter->ReadMapList("Alias", aliases);
+		BH::lootFilter->ReadMapList("Formula", formulas);
 		BH::lootFilter->ReadMapList("ItemDisplay", rules);
 
 		// Limit aliases to single keywords
@@ -1851,6 +1886,97 @@ namespace ItemDisplay
 
 			if (aliases[i].first.find(" ") != string::npos)
 				aliases[i].first.erase(aliases[i].first.find(" "));
+		}
+
+		// must be lowercase
+		std::vector<FormulaVarDefinition<FormulaContext>> defs = {
+			{ "stat", 1, [](UnitItemInfo* ctx, const std::vector<int>& ids) -> float
+				{
+					auto stat = ids[0];
+					int tmpVal = D2COMMON_GetUnitStat(ctx->item, stat, 0);
+					if (stat == STAT_MAXHP || stat == STAT_MAXMANA)
+					{
+						tmpVal /= 256;
+					}
+					else if (
+						stat == STAT_ENHANCEDDEFENSE ||				// return 0
+						stat == STAT_ENHANCEDMAXIMUMDAMAGE ||		// return 0
+						stat == STAT_ENHANCEDMINIMUMDAMAGE ||		// return 0
+						stat == STAT_MINIMUMDAMAGE ||				// return base min 1h weapon damage
+						stat == STAT_MAXIMUMDAMAGE ||				// return base max 1h weapon damage
+						stat == STAT_SECONDARYMINIMUMDAMAGE ||		// return base min 2h weapon damage
+						stat == STAT_SECONDARYMAXIMUMDAMAGE			// return base max 2h weapon damage
+						)
+					{
+						tmpVal = GetStatFromList(ctx, stat);
+					}
+					return (float)tmpVal;
+				}
+			},
+			{ "multi", 2, [](UnitItemInfo* ctx, const std::vector<int>& ids) -> float
+				{
+					auto stat = ids[0];
+					auto layer = ids[1];
+					int tmpVal = D2COMMON_GetUnitStat(ctx->item, stat, layer);
+					if (stat == STAT_MAXHP || stat == STAT_MAXMANA)
+					{
+						tmpVal /= 256;
+					}
+					else if (
+						stat == STAT_ENHANCEDDEFENSE ||				// return 0
+						stat == STAT_ENHANCEDMAXIMUMDAMAGE ||		// return 0
+						stat == STAT_ENHANCEDMINIMUMDAMAGE ||		// return 0
+						stat == STAT_MINIMUMDAMAGE ||				// return base min 1h weapon damage
+						stat == STAT_MAXIMUMDAMAGE ||				// return base max 1h weapon damage
+						stat == STAT_SECONDARYMINIMUMDAMAGE ||		// return base min 2h weapon damage
+						stat == STAT_SECONDARYMAXIMUMDAMAGE			// return base max 2h weapon damage
+						)
+					{
+						tmpVal = GetStatFromList(ctx, stat);
+					}
+					return (float)tmpVal;
+				}
+			},
+			{ "charstat", 1, [](UnitItemInfo* ctx, const std::vector<int>& ids) -> float
+				{
+					auto stat = ids[0];
+					int tmpVal = D2COMMON_GetUnitStat(D2CLIENT_GetPlayerUnit(), stat, 0);
+					if (stat == STAT_MAXHP || stat == STAT_MAXMANA)
+					{
+						tmpVal /= 256;
+					}
+					else if (
+						stat == STAT_ENHANCEDDEFENSE ||				// return 0
+						stat == STAT_ENHANCEDMAXIMUMDAMAGE ||		// return 0
+						stat == STAT_ENHANCEDMINIMUMDAMAGE ||		// return 0
+						stat == STAT_MINIMUMDAMAGE ||				// return base min 1h weapon damage
+						stat == STAT_MAXIMUMDAMAGE ||				// return base max 1h weapon damage
+						stat == STAT_SECONDARYMINIMUMDAMAGE ||		// return base min 2h weapon damage
+						stat == STAT_SECONDARYMAXIMUMDAMAGE			// return base max 2h weapon damage
+						)
+					{
+						tmpVal = GetStatFromList(ctx, stat);
+					}
+					return (float)tmpVal;
+				}
+			},
+		};
+		for (const auto& f : formulas)
+		{
+			const auto key = f.first;
+			const auto text = f.second;
+
+			auto formulaRef = "FORMULA" + key;
+			transform(formulaRef.begin(), formulaRef.end(), formulaRef.begin(), toupper);
+
+			std::unique_ptr<Formula<FormulaContext>> out;
+			if (Formula<FormulaContext>::Compile(text, out, defs) != FormulaStatus::OK)
+			{
+				continue;
+			}
+
+			formulaMap.insert({ formulaRef, std::move(out) });
+			FormulaReplacementMap.insert_or_assign(formulaRef, ReplacementSpec { 0, ReplacementSpec::ReplaceBindFormula(formulaMap.find(formulaRef)->second) });
 		}
 
 		for (unsigned int i = 0; i < rules.size(); i++)
@@ -2384,6 +2510,10 @@ void Condition::BuildConditions(vector<Condition*>& conditions,
 	{
 		condition = COND_MULTI;
 	}
+	else if (formulaMap.find(key) != formulaMap.end())
+	{
+		condition = COND_FORMULA;
+	}
 
 	switch (condition)
 	{
@@ -2818,6 +2948,9 @@ void Condition::BuildConditions(vector<Condition*>& conditions,
 		break;
 
 	case COND_NULL:
+		break;
+	case COND_FORMULA:
+		Condition::AddOperand(conditions, new FormulaCondition(key, operation, value, value2));
 		break;
 	default:
 		break;
@@ -3540,10 +3673,15 @@ void AddCondition::Init()
 		smatch match;
 		if (regex_search(code, match, statRegex)) {
 			if (skills.find(match[1]) == skills.end()) {
+				if (formulaMap.find(match[1]) == formulaMap.end()) {
+					continue;
+				}
+				fs.emplace_back(formulaMap.find(match[1])->second.get());
 				continue;
 			}
-			DWORD id = skills.find(match[1])->second.id;
-			DWORD params = skills.find(match[1])->second.params;
+			auto& found = skills.find(match[1]);
+			DWORD id = found->second.id;
+			DWORD params = found->second.params;
 			int paramCount = (match[2].length() != 0) + (match[3].length() != 0);
 			if (params != paramCount) {
 				continue;
@@ -3583,8 +3721,41 @@ bool AddCondition::EvaluateInternal(UnitItemInfo* uInfo,
 		}
 		value += tmpVal;
 	}
+	for (const auto& f : fs)
+	{
+		float out;
+		if (f->execute(uInfo, out) == FormulaStatus::OK)
+		{
+			value += out;
+		}
+	}
 
 	return IntegerCompare(value, operation, targetStat);
+}
+
+FormulaCondition::FormulaCondition(string& k,
+	BYTE         op,
+	unsigned int target,
+	unsigned int target2) : key(k),
+	operation(op),
+	targetStat(target),
+	targetStat2(target2)
+{
+	conditionType = CT_Operand;
+	f = formulaMap.find(key)->second.get();
+};
+
+bool FormulaCondition::EvaluateInternal(UnitItemInfo* uInfo,
+	Condition* arg1,
+	Condition* arg2)
+{
+	float out;
+	if (f->execute(uInfo, out) != FormulaStatus::OK)
+	{
+		return false;
+	}
+	int value = out;
+	return IntegerCompare(value, operation, targetStat, targetStat2);
 }
 
 int GetStatFromList(UnitItemInfo* uInfo, int itemStat)
