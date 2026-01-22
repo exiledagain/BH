@@ -93,7 +93,7 @@ template<typename T>
 class Formula
 {
 	static float eval(const FormulaNode<T>* n, T* ctx, FormulaStatus& e);
-	static void optimize(std::unique_ptr<FormulaNode<T>>& n);
+	static void optimize(std::unique_ptr<FormulaNode<T>>& n, FormulaStatus& e);
 
 	std::unique_ptr<FormulaNode<T>> root;
 public:
@@ -525,7 +525,7 @@ float Formula<T>::eval(const FormulaNode<T>* n, T* ctx, FormulaStatus& e)
 			return false;
 		}
 		return true;
-		};
+	};
 
 	switch (n->op) {
 		case FormulaOpCode::LITERAL:
@@ -725,13 +725,13 @@ float Formula<T>::eval(const FormulaNode<T>* n, T* ctx, FormulaStatus& e)
 }
 
 template<typename T>
-void Formula<T>::optimize(std::unique_ptr<FormulaNode<T>>& n)
+void Formula<T>::optimize(std::unique_ptr<FormulaNode<T>>& n, FormulaStatus& err)
 {
-	if (!n) {
+	if (!n || err != FormulaStatus::OK) {
 		return;
 	}
 	for (auto& child : n->children) {
-		optimize(child);
+		optimize(child, err);
 	}
 
 	bool allLiterals = !n->children.empty();
@@ -742,13 +742,14 @@ void Formula<T>::optimize(std::unique_ptr<FormulaNode<T>>& n)
 	}
 
 	if (allLiterals && n->op != FormulaOpCode::RESOLVER && n->op != FormulaOpCode::LITERAL) {
-		FormulaStatus err = FormulaStatus::OK;
 		float val = eval(n.get(), nullptr, err);
-		if (err == FormulaStatus::OK) {
-			n->children.clear();
-			n->op = FormulaOpCode::LITERAL;
-			n->literalValue = val;
+		if (err != FormulaStatus::OK) {
+			err = FormulaStatus::MATH_ERROR;
+			return;
 		}
+		n->children.clear();
+		n->op = FormulaOpCode::LITERAL;
+		n->literalValue = val;
 	}
 	else if (n->op == FormulaOpCode::IF && n->children[0]->op == FormulaOpCode::LITERAL) {
 		if (Formula<T>::IsTrue(n->children[0]->literalValue)) {
@@ -796,7 +797,8 @@ FormulaStatus Formula<T>::Compile(const std::string& raw, std::unique_ptr<Formul
 		return (err == FormulaStatus::OK) ? FormulaStatus::SYNTAX_ERROR : err;
 	}
 
-	optimize(rootNode);
+	optimize(rootNode, err);
+
 	out = std::make_unique<Formula>(std::move(rootNode));
 	return FormulaStatus::OK;
 }

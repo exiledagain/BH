@@ -1186,9 +1186,9 @@ function<string(ReplaceContext& ctx, const ReplacementValue& val)> ReplacementSp
 {
 	return [f](ReplaceContext& ctx, const ReplacementValue& val) -> string {
 		float out = 0.0f;
-		if (f->execute(ctx.info, out) != FormulaStatus::OK)
+		if (f->execute(ctx.info, out) != FormulaStatus::OK || !std::isfinite(out))
 		{
-			return "";
+			return "f_err";
 		}
 		// limit to two sig figs
 		char buffer[16];
