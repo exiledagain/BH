@@ -522,14 +522,6 @@ float Formula<T>::eval(const std::unique_ptr<FormulaNode<T>>& n, T* ctx, Formula
 		return 0;
 	}
 
-	const auto check = [&](size_t req) {
-		if (n->children.size() < req) {
-			e = FormulaStatus::ARG_COUNT_ERROR;
-			return false;
-		}
-		return true;
-	};
-
 	switch (n->op) {
 		case FormulaOpCode::LITERAL:
 		{
@@ -541,105 +533,58 @@ float Formula<T>::eval(const std::unique_ptr<FormulaNode<T>>& n, T* ctx, Formula
 		}
 		case FormulaOpCode::NEGATE:
 		{
-			if (!check(1)) {
-				return 0;
-			}
 			return -eval(n->children[0], ctx, e);
 		}
 		case FormulaOpCode::NOT:
 		{
-			if (!check(1)) {
-				return 0;
-			}
 			return eval(n->children[0], ctx, e) == 0;
 		}
 		case FormulaOpCode::ADD:
 		{
-			if (!check(2)) {
-				return 0;
-			}
 			return eval(n->children[0], ctx, e) + eval(n->children[1], ctx, e);
 		}
 		case FormulaOpCode::SUB:
 		{
-			if (!check(2)) {
-				return 0;
-			}
 			return eval(n->children[0], ctx, e) - eval(n->children[1], ctx, e);
 		}
 		case FormulaOpCode::MUL:
 		{
-			if (!check(2)) {
-				return 0;
-			}
 			return eval(n->children[0], ctx, e) * eval(n->children[1], ctx, e);
 		}
 		case FormulaOpCode::DIV:
 		{
-			if (!check(2)) {
-				return 0;
-			}
-			float d = eval(n->children[1], ctx, e);
-			if (d == 0.0f) {
-				e = FormulaStatus::MATH_ERROR;
-				return 0;
-			}
-			return eval(n->children[0], ctx, e) / d;
+			return eval(n->children[0], ctx, e) / eval(n->children[1], ctx, e);
 		}
 		case FormulaOpCode::POW:
 		{
-			if (!check(2)) {
-				return 0;
-			}
 			return std::pow(eval(n->children[0], ctx, e), eval(n->children[1], ctx, e));
 		}
 		case FormulaOpCode::EQ:
 		{
-			if (!check(2)) {
-				return 0;
-			}
 			return eval(n->children[0], ctx, e) == eval(n->children[1], ctx, e);
 		}
 		case FormulaOpCode::NE:
 		{
-			if (!check(2)) {
-				return 0;
-			}
 			return eval(n->children[0], ctx, e) != eval(n->children[1], ctx, e);
 		}
 		case FormulaOpCode::GT:
 		{
-			if (!check(2)) {
-				return 0;
-			}
 			return eval(n->children[0], ctx, e) > eval(n->children[1], ctx, e);
 		}
 		case FormulaOpCode::LT:
 		{
-			if (!check(2)) {
-				return 0;
-			}
 			return eval(n->children[0], ctx, e) < eval(n->children[1], ctx, e);
 		}
 		case FormulaOpCode::GE:
 		{
-			if (!check(2)) {
-				return 0;
-			}
 			return eval(n->children[0], ctx, e) >= eval(n->children[1], ctx, e);
 		}
 		case FormulaOpCode::LE:
 		{
-			if (!check(2)) {
-				return 0;
-			}
 			return eval(n->children[0], ctx, e) <= eval(n->children[1], ctx, e);
 		}
 		case FormulaOpCode::IF:
 		{
-			if (!check(3)) {
-				return 0;
-			}
 			return Formula<T>::IsTrue(eval(n->children[0], ctx, e)) ? eval(n->children[1], ctx, e) : eval(n->children[2], ctx, e);
 		}
 		case FormulaOpCode::AND:
@@ -662,37 +607,22 @@ float Formula<T>::eval(const std::unique_ptr<FormulaNode<T>>& n, T* ctx, Formula
 		}
 		case FormulaOpCode::LN:
 		{
-			if (!check(1)) {
-				return 0;
-			}
 			return std::log(eval(n->children[0], ctx, e));
 		}
 		case FormulaOpCode::EXP:
 		{
-			if (!check(1)) {
-				return 0;
-			}
 			return std::exp(eval(n->children[0], ctx, e));
 		}
 		case FormulaOpCode::FLOOR:
 		{
-			if (!check(1)) {
-				return 0;
-			}
 			return std::floor(eval(n->children[0], ctx, e));
 		}
 		case FormulaOpCode::CEIL:
 		{
-			if (!check(1)) {
-				return 0;
-			}
 			return std::ceil(eval(n->children[0], ctx, e));
 		}
 		case FormulaOpCode::ROUND:
 		{
-			if (!check(1)) {
-				return 0;
-			}
 			return std::round(eval(n->children[0], ctx, e));
 		}
 		case FormulaOpCode::MIN:
@@ -715,15 +645,7 @@ float Formula<T>::eval(const std::unique_ptr<FormulaNode<T>>& n, T* ctx, Formula
 		}
 		case FormulaOpCode::MOD:
 		{
-			if (!check(2)) {
-				return 0;
-			}
-			float d = eval(n->children[1], ctx, e);
-			if (d == 0.0f) {
-				e = FormulaStatus::MATH_ERROR;
-				return 0;
-			}
-			return std::fmodf(eval(n->children[0], ctx, e), d);
+			return std::fmodf(eval(n->children[0], ctx, e), eval(n->children[1], ctx, e));
 		}
 		case FormulaOpCode::AVERAGE:
 		{
