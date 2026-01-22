@@ -189,11 +189,14 @@ public:
 			}
 
 			if (std::isdigit(input[i]) || input[i] == '.') {
-				size_t start = i++;
-				while (i < input.length() && (std::isdigit(input[i]) || input[i] == '.')) {
-					i++;
+				char* end = nullptr;
+				std::ignore = strtof(input.c_str() + i, &end);
+				size_t len = end - input.c_str() - i;
+				if (len == 0) {
+					return FormulaStatus::LEXICAL_ERROR;
 				}
-				stream.add({ FormulaTokenType::NUMBER, input.substr(start, i - start) });
+				stream.add({ FormulaTokenType::NUMBER, input.substr(i, len) });
+				i = end - input.c_str();
 				continue;
 			}
 
@@ -211,15 +214,10 @@ public:
 	}
 };
 
-template<typename T>
-class FormulaParser
+namespace FormulaData
 {
-	FormulaTokenStream& stream;
-	FormulaStatus& err;
-	const std::vector<FormulaVarDefinition<T>>& registry;
-
 	// lower precedence ops are evaluated after higher ones
-	static const std::map<std::string, std::pair<FormulaOpCode, int>> opTable = {
+	const std::map<std::string, std::pair<FormulaOpCode, int>> opTable = {
 		{"==", {FormulaOpCode::EQ, 1}},
 		{">", {FormulaOpCode::GT, 1}},
 		{"<", {FormulaOpCode::LT, 1}},
@@ -233,7 +231,7 @@ class FormulaParser
 		{"^", {FormulaOpCode::POW, 4}}
 	};
 
-	static const std::map<std::string, FormulaOpCode> fnTable = {
+	const std::map<std::string, FormulaOpCode> fnTable = {
 		{"if", FormulaOpCode::IF},
 		{"and", FormulaOpCode::AND},
 		{"or", FormulaOpCode::OR},
@@ -246,6 +244,14 @@ class FormulaParser
 		{"max", FormulaOpCode::MAX},
 		{"mod", FormulaOpCode::MOD}
 	};
+}
+
+template<typename T>
+class FormulaParser
+{
+	FormulaTokenStream& stream;
+	FormulaStatus& err;
+	const std::vector<FormulaVarDefinition<T>>& registry;
 
 	std::unique_ptr<FormulaNode<T>> parseExpression(const int minPrec)
 	{
@@ -258,11 +264,11 @@ class FormulaParser
 		while (lastPos != stream.position()) {
 			lastPos = stream.position();
 			const FormulaToken& t = stream.peek();
-			if (t.type != FormulaTokenType::OP || opTable.count(t.value) == 0) {
+			if (t.type != FormulaTokenType::OP || FormulaData::opTable.count(t.value) == 0) {
 				break;
 			}
 
-			auto& opt = opTable.at(t.value);
+			auto& opt = FormulaData::opTable.at(t.value);
 			const auto& prec = opt.second;
 			if (prec < minPrec) {
 				break;
@@ -321,7 +327,7 @@ class FormulaParser
 		if (t.type == FormulaTokenType::VARIABLE) {
 			std::string name = t.value;
 
-			if (fnTable.count(name)) {
+			if (FormulaData::fnTable.count(name)) {
 				return parseFunction(name);
 			}
 
@@ -413,7 +419,7 @@ class FormulaParser
 
 	std::unique_ptr<FormulaNode<T>> parseFunction(const std::string& name)
 	{
-		FormulaOpCode code = fnTable.at(name);
+		FormulaOpCode code = FormulaData::fnTable.at(name);
 		stream.advance();
 
 		auto n = std::make_unique<FormulaNode<T>>(code);
