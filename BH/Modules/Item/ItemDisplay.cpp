@@ -2006,9 +2006,10 @@ void ReplaceFormulaIslands(std::string& text, std::string& pre, std::string& suf
 				RegisterFormula(ref, out);
 				const auto replacement = pre + ref + suf;
 				text.replace(start, len + 4, replacement);
-				offset = start + replacement.length();
-				continue;
+				len = replacement.length() - 4;
 			}
+			offset = start + len + 4;
+			continue;
 		}
 		// found start pattern but didn't match ')'
 		offset = start + 3;
