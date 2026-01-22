@@ -3764,7 +3764,7 @@ void AddCondition::Init()
 				if (formulaMap.find(match[1]) == formulaMap.end()) {
 					continue;
 				}
-				fs.emplace_back(formulaMap.find(match[1])->second.get());
+				fs.emplace_back(formulaMap.find(match[1])->second);
 				continue;
 			}
 			auto& found = skills.find(match[1]);

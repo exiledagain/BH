@@ -806,7 +806,7 @@ public:
 private:
 	BYTE           operation;
 	vector<string> codes;
-	vector<Formula<FormulaContext>*> fs;
+	vector<shared_ptr<Formula<FormulaContext>>> fs;
 	vector<tuple<DWORD, DWORD>>  stats;
 	unsigned int   targetStat;
 	string         key;
