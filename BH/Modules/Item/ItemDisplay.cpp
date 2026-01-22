@@ -2000,16 +2000,15 @@ void ReplaceFormulaIslands(std::string& text, std::string& pre, std::string& suf
 		{
 			std::unique_ptr<Formula<FormulaContext>> out;
 			size_t len = i - (start + 3);
-			if (Formula<FormulaContext>::Compile(text.substr(start + 3, len), out, formulaVarDefs) != FormulaStatus::OK)
+			if (Formula<FormulaContext>::Compile(text.substr(start + 3, len), out, formulaVarDefs) == FormulaStatus::OK)
 			{
-				break;
+				const auto ref = GetNextFormulaIslandRef();
+				RegisterFormula(ref, out);
+				const auto replacement = pre + ref + suf;
+				text.replace(start, len + 4, replacement);
+				offset = start + replacement.length();
+				continue;
 			}
-			const auto ref = GetNextFormulaIslandRef();
-			RegisterFormula(ref, out);
-			const auto replacement = pre + ref + suf;
-			text.replace(start, len + 4, replacement);
-			offset = start + replacement.length();
-			continue;
 		}
 		// found start pattern but didn't match ')'
 		offset = start + 3;
