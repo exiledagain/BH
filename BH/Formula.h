@@ -4,7 +4,7 @@
 #include <cmath>
 #include <cstdlib>
 #include <functional>
-#include <map>
+#include <unordered_map>
 #include <memory>
 #include <string>
 #include <vector>
@@ -58,7 +58,8 @@ enum class FormulaOpCode
 	ROUND,
 	MIN,
 	MAX,
-	MOD
+	MOD,
+	AVERAGE
 };
 
 template<typename T>
@@ -217,7 +218,7 @@ public:
 namespace FormulaData
 {
 	// lower precedence ops are evaluated after higher ones
-	const std::map<std::string, std::pair<FormulaOpCode, int>> opTable = {
+	const std::unordered_map<std::string, std::pair<FormulaOpCode, int>> opTable = {
 		{"==", {FormulaOpCode::EQ, 1}},
 		{">", {FormulaOpCode::GT, 1}},
 		{"<", {FormulaOpCode::LT, 1}},
@@ -231,7 +232,7 @@ namespace FormulaData
 		{"^", {FormulaOpCode::POW, 4}}
 	};
 
-	const std::map<std::string, FormulaOpCode> fnTable = {
+	const std::unordered_map<std::string, FormulaOpCode> fnTable = {
 		{"if", FormulaOpCode::IF},
 		{"and", FormulaOpCode::AND},
 		{"or", FormulaOpCode::OR},
@@ -242,7 +243,8 @@ namespace FormulaData
 		{"round", FormulaOpCode::ROUND},
 		{"min", FormulaOpCode::MIN},
 		{"max", FormulaOpCode::MAX},
-		{"mod", FormulaOpCode::MOD}
+		{"mod", FormulaOpCode::MOD},
+		{"average", FormulaOpCode::AVERAGE}
 	};
 }
 
@@ -264,11 +266,11 @@ class FormulaParser
 		while (lastPos != stream.position()) {
 			lastPos = stream.position();
 			const FormulaToken& t = stream.peek();
-			if (t.type != FormulaTokenType::OP || FormulaData::opTable.count(t.value) == 0) {
+			if (t.type != FormulaTokenType::OP || FormulaData::opTable.find(t.value) == FormulaData::opTable.end()) {
 				break;
 			}
 
-			auto& opt = FormulaData::opTable.at(t.value);
+			auto& opt = FormulaData::opTable.find(t.value)->second;
 			const auto& prec = opt.second;
 			if (prec < minPrec) {
 				break;
@@ -327,7 +329,7 @@ class FormulaParser
 		if (t.type == FormulaTokenType::VARIABLE) {
 			std::string name = t.value;
 
-			if (FormulaData::fnTable.count(name)) {
+			if (FormulaData::fnTable.find(name) != FormulaData::fnTable.end()) {
 				return parseFunction(name);
 			}
 
@@ -419,7 +421,7 @@ class FormulaParser
 
 	std::unique_ptr<FormulaNode<T>> parseFunction(const std::string& name)
 	{
-		FormulaOpCode code = FormulaData::fnTable.at(name);
+		FormulaOpCode code = FormulaData::fnTable.find(name)->second;
 		stream.advance();
 
 		auto n = std::make_unique<FormulaNode<T>>(code);
@@ -483,6 +485,7 @@ class FormulaParser
 			case FormulaOpCode::OR:
 			case FormulaOpCode::MIN:
 			case FormulaOpCode::MAX:
+			case FormulaOpCode::AVERAGE:
 			{
 				ok = count > 0;
 				break;
@@ -721,6 +724,14 @@ float Formula<T>::eval(const FormulaNode<T>* n, T* ctx, FormulaStatus& e)
 				return 0;
 			}
 			return std::fmodf(eval(n->children[0].get(), ctx, e), d);
+		}
+		case FormulaOpCode::AVERAGE:
+		{
+			float res = 0.0;
+			for (auto& c : n->children) {
+				res += eval(c.get(), ctx, e);
+			}
+			return res / n->children.size();
 		}
 		default:
 		{
