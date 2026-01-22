@@ -715,7 +715,12 @@ float Formula<T>::eval(const FormulaNode<T>* n, T* ctx, FormulaStatus& e)
 			if (!check(2)) {
 				return 0;
 			}
-			return std::fmodf(eval(n->children[0].get(), ctx, e), eval(n->children[1].get(), ctx, e));
+			float d = eval(n->children[1].get(), ctx, e);
+			if (d == 0.0f) {
+				e = FormulaStatus::MATH_ERROR;
+				return 0;
+			}
+			return std::fmodf(eval(n->children[0].get(), ctx, e), d);
 		}
 		default:
 		{
