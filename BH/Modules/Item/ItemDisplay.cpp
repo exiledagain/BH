@@ -1934,87 +1934,84 @@ bool IntegerCompare(int Lvalue,
 
 void RegisterFormula(const std::string& ref, std::unique_ptr<Formula<FormulaContext>>& ptr)
 {
-	formulaMap.insert({ ref, std::move(ptr) });
+	formulaMap.insert_or_assign(ref, std::move(ptr));
 	FormulaReplacementMap.insert_or_assign(ref, ReplacementSpec{ 0, ReplacementSpec::ReplaceBindFormula(formulaMap.find(ref)->second) });
 }
 
-const std::string IslandIdentifier = "$f(";
-const std::string IslandPrefix = "ISLAND_";
-vector<char> IslandSuffix = { 'A' - 1 };
-
-string GetNextFormulaIslandRef()
+struct IslandReplacementHelper
 {
-	for (size_t i = 0; i < IslandSuffix.size(); ++i)
+	const std::string IslandIdentifier = "$f(";
+	const std::string IslandPrefix = "ISLAND_";
+	vector<char> IslandSuffix = { 'A' - 1 };
+
+	void reset()
 	{
-		if (IslandSuffix[i] == 'Z')
-		{
-			if (i + 1 >= IslandSuffix.size())
-			{
-				IslandSuffix.push_back('A' - 1);
-			}
-			IslandSuffix[i] = 'A';
-		}
-		else
-		{
-			IslandSuffix[i] += 1;
-			break;
-		}
+		IslandSuffix = { 'A' - 1 };
 	}
 
-	string suffix = "";
-	for (size_t i = 0; i < IslandSuffix.size(); ++i)
+	string GetNextFormulaIslandRef()
 	{
-		suffix += IslandSuffix[i];
-	}
-
-	return IslandPrefix + suffix;
-}
-
-void ReplaceFormulaIslands(std::string& text, std::string& pre, std::string& suf)
-{
-	size_t offset = 0;
-	while (offset < text.length())
-	{
-		const auto start = text.find(IslandIdentifier, offset);
-		if (start == string::npos)
-		{
-			return;
-		}
-		size_t i = start + 3;
-		for (size_t count = 1; i < text.length(); ++i)
-		{
-			if (text[i] == '(')
-			{
-				count += 1;
+		for (size_t i = 0; i < IslandSuffix.size(); ++i) {
+			if (IslandSuffix[i] == 'Z') {
+				IslandSuffix[i] = 'A';
+				if (i + 1 >= IslandSuffix.size()) {
+					IslandSuffix.push_back('A');
+					break;
+				}
 			}
-			else if (text[i] == ')')
-			{
-				count -= 1;
-			}
-			if (count == 0)
-			{
+			else {
+				IslandSuffix[i] += 1;
 				break;
 			}
 		}
-		if (i < text.length())
-		{
-			std::unique_ptr<Formula<FormulaContext>> out;
-			size_t len = i - (start + 3);
-			if (Formula<FormulaContext>::Compile(text.substr(start + 3, len), out, formulaVarDefs) == FormulaStatus::OK)
-			{
-				const auto ref = GetNextFormulaIslandRef();
-				RegisterFormula(ref, out);
-				const auto replacement = pre + ref + suf;
-				text.replace(start, len + 4, replacement);
-				len = replacement.length() - 4;
-			}
-			offset = start + len + 4;
-			continue;
+
+		string res = IslandPrefix;
+		for (size_t i = 0; i < IslandSuffix.size(); ++i) {
+			res += IslandSuffix[i];
 		}
-		// found start pattern but didn't match ')'
-		offset = start + 3;
+
+		return res;
 	}
-}
+
+	void ReplaceFormulaIslands(std::string& text, std::string& pre, std::string& suf)
+	{
+		size_t offset = 0;
+		while (offset < text.length()) {
+			const auto start = text.find(IslandIdentifier, offset);
+			if (start == string::npos) {
+				return;
+			}
+			size_t i = start + IslandIdentifier.length();
+			for (size_t count = 1; i < text.length(); ++i) {
+				if (text[i] == '(') {
+					count += 1;
+				}
+				else if (text[i] == ')') {
+					count -= 1;
+				}
+				if (count == 0) {
+					break;
+				}
+			}
+			if (i < text.length()) {
+				std::unique_ptr<Formula<FormulaContext>> out;
+				size_t len = i - (start + IslandIdentifier.length());
+				if (Formula<FormulaContext>::Compile(text.substr(start + IslandIdentifier.length(), len), out, formulaVarDefs) == FormulaStatus::OK) {
+					const auto ref = GetNextFormulaIslandRef();
+					RegisterFormula(ref, out);
+					const auto replacement = pre + ref + suf;
+					text.replace(start, len + IslandIdentifier.length() + 1, replacement);
+					len = replacement.length() - IslandIdentifier.length() - 1;
+				}
+				offset = start + len + IslandIdentifier.length() + 1;
+				continue;
+			}
+			// found start pattern but didn't match ')'
+			offset = start + IslandIdentifier.length();
+		}
+	}
+};
+IslandReplacementHelper islandReplacementHelper;
 
 namespace ItemDisplay
 {
@@ -2032,8 +2029,7 @@ namespace ItemDisplay
 		formulas.clear();
 		formulaMap.clear();
 		FormulaReplacementMap.clear();
-		IslandSuffix.clear();
-		IslandSuffix.push_back('A' - 1);
+		islandReplacementHelper.reset();
 		ResetCaches();
 		BH::lootFilter->ReadMapList("Alias", aliases);
 		BH::lootFilter->ReadMapList("Formula", formulas);
@@ -2083,8 +2079,8 @@ namespace ItemDisplay
 			}
 
 			// find inline formula islands
-			ReplaceFormulaIslands(rules[i].first, empty, empty);
-			ReplaceFormulaIslands(rules[i].second, percent, percent);
+			islandReplacementHelper.ReplaceFormulaIslands(rules[i].first, empty, empty);
+			islandReplacementHelper.ReplaceFormulaIslands(rules[i].second, percent, percent);
 
 			string         buf;
 			stringstream   ss(rules[i].first);
